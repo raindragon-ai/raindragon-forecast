@@ -1,0 +1,25 @@
+{
+  "product": "RainDragon Forecast",
+  "version": "0.2.0",
+  "method": "walk-forward replay of one user's own history",
+  "split": {
+    "rule": "every good turn is scored against the range built from the good turns strictly before it; never itself, never a later turn",
+    "recent_window": 300,
+    "min_ready": 10,
+    "confident": 30,
+    "min_group": 8
+  },
+  "bands": {"50": [0.25, 0.75], "80": [0.10, 0.90]},
+  "excluded_turns": ["failed", "stopped by the user", "during a major incident"],
+  "learning_phase": "turns 10-29 are scored at the wide (80) range the user was actually shown",
+  "targets": {"50": "coverage within a few points of 0.50", "80": "coverage within a few points of 0.80"},
+  "code": {
+    "plugin": "plugin/scripts/raindragon_eta/predict.py: evaluate()",
+    "extension": "extension/lib/predict.js: evaluate()",
+    "user_command": "/forecast:stats (plugin), options page (extension)"
+  },
+  "checked_by": "tests/test_eval_manifest.py fails if the code's constants drift from this file",
+  "not_reproducible_from_this_repo": [
+    "CLAIMS.md claim 3 (turns 1.81x longer during major incidents, 0.91x during minor ones) was measured on an earlier reference corpus that is not in this repository"
+  ]
+}

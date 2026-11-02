@@ -111,6 +111,13 @@ Commands you can type:
 
 ### Chrome extension
 
+Install it from the Chrome Web Store:
+[RainDragon Forecast](https://chromewebstore.google.com/detail/raindragon-forecast/einaffiijngkcobkdmdaapnldgkjlinc).
+Click **Add to Chrome**, then open claude.ai, chatgpt.com or
+gemini.google.com and start typing.
+
+Or load a release zip by hand:
+
 1. Download `raindragon-forecast-extension-<version>.zip` from the
    [releases page](https://github.com/raindragon-ai/raindragon-forecast/releases) and unzip it.
 2. Open `chrome://extensions`, turn on **Developer mode**, click **Load
@@ -134,6 +141,9 @@ shasum -a 256 -c SHA256SUMS    # macOS
 ```
 
 Every line must say `OK`.
+
+How the ranges are checked, and the frozen evaluation split, are in
+[docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## Upgrading from RainDragon ETA
 

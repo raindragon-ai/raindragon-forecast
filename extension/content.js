@@ -5,6 +5,10 @@
  * While Claude replies: the elapsed time next to that band.
  * After: the reply's duration and word count are saved locally (no text).
  *
+ * Optional (settings serverSendText + serverMode, default off / shadow): the
+ * prompt text goes to RainDragon's server model via background.js; in shadow
+ * mode its answer is only logged next to the local band (numbers only).
+ *
  * Page signals used (claude.ai test ids, checked 2026-10-08):
  *   [data-testid=chat-input]           the prompt editor
  *   [data-testid=chat-input-send]      the send button
@@ -29,7 +33,8 @@
   const TICK_MS = 250;
   const MAX_TURN_MS = 30 * 60 * 1000;   // longer than this is a tab left open
   const HISTORY_CAP = 1000;
-  const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false };
+  const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false,
+                     serverMode: "shadow", serverSendText: false };
 
   let settings = Object.assign({}, DEFAULTS);
   let history = [];
@@ -37,13 +42,19 @@
   let lastResult = null;  // {text, until}
   let incident = null;
   let ctxCache = { at: 0, chars: 0 };
+  let installId = null;
 
   // ---------- storage ----------
 
   function load() {
-    chrome.storage.local.get({ history: [], settings: DEFAULTS }, (v) => {
+    chrome.storage.local.get({ history: [], settings: DEFAULTS, install_id: null }, (v) => {
       history = Array.isArray(v.history) ? v.history : [];
       settings = Object.assign({}, DEFAULTS, v.settings || {});
+      installId = typeof v.install_id === "string" ? v.install_id : null;
+      if (!installId) {
+        installId = crypto.randomUUID();
+        try { chrome.storage.local.set({ install_id: installId }); } catch (e) { /* reloaded */ }
+      }
     });
   }
   chrome.storage.onChanged.addListener((ch, area) => {
@@ -70,9 +81,28 @@
 
   const $ = (s) => document.querySelector(s);
 
-  function promptChars() {
+  function promptText() {
     const el = $(SEL.input);
-    return el ? el.innerText.trim().length : 0;
+    return el ? el.innerText.trim() : "";
+  }
+
+  function promptChars() {
+    return promptText().length;
+  }
+
+  // Shadow / server / blend: ask the server model. The text goes only to
+  // background.js (and from there to the server); nothing here keeps it.
+  function askServer(p, text) {
+    if (!T.serverActive(settings) || !installId || !text) return;
+    try {
+      chrome.runtime.sendMessage({ type: "eta_predict", body: T.serverBody(installId, text) }, (r) => {
+        if (chrome.runtime.lastError || !r || pending !== p) return;
+        p.srv = r;
+        const pick = T.chooseBand(settings.serverMode, p.localBand, history, r.tok ? r : null, settings.band);
+        p.band = pick.band;
+        p.shown = pick.shown;
+      });
+    } catch (e) { /* extension reloaded: local band stays */ }
   }
 
   function contextChars(fresh) {
@@ -114,17 +144,20 @@
     if (!settings.enabled) return;     // kill switch: show nothing, record nothing
     const now = Date.now();
     if (pending && now - pending.start < 1500) return;   // Enter + click for one send
-    const pc = promptChars();
+    const text = promptText();
+    const pc = text.length;
     if (pc === 0) return;
     const cc = contextChars(true);
     const model = modelLabel();
+    const local = T.predict(history, pc, cc, model, settings.band);
     pending = {
       start: now, before: lastReply(), el: null, sawStreaming: false, firstAt: null,
       pb: T.promptBucket(pc), cb: T.contextBucket(cc), model: T.modelKey(model),
       incident: !!incident, stopped: false,
-      band: T.predict(history, pc, cc, model, settings.band),
+      band: local, localBand: local, shown: "local", srv: null,
     };
     lastResult = null;
+    askServer(pending, text);
   }
 
   function finish(ok) {
@@ -138,6 +171,20 @@
     if (ok) {
       rec.words = wordCount(p.el);
       if (p.firstAt) rec.first = Math.round((p.firstAt - p.start) / 10) / 100;
+    }
+    if (p.localBand) rec.loc = [Math.round(p.localBand.dur.low * 100) / 100, Math.round(p.localBand.dur.high * 100) / 100];
+    if (p.shown !== "local") rec.shown = p.shown;
+    if (p.srv && p.srv.tok) {
+      rec.srv_tok = p.srv.tok; rec.srv_ms = p.srv.ms; rec.srv_ver = p.srv.ver;
+      if (T.serverActive(settings) && installId) {
+        try {
+          chrome.runtime.sendMessage({ type: "eta_outcome", body: {
+            prediction_id: p.srv.pid, install_id: installId, duration_ms: Math.round(dur * 1000), failed: !ok } },
+            () => void chrome.runtime.lastError);
+        } catch (e) { /* reloaded */ }
+      }
+    } else if (p.srv && p.srv.err) {
+      rec.srv_err = String(p.srv.err).slice(0, 20);
     }
     save(rec);
     if (ok && settings.showResult) {

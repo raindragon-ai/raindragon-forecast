@@ -167,10 +167,12 @@ Chrome stores the history inside the extension.
 | Show actual time | After each turn, say how long it really took and whether that was inside the forecast | off |
 | Check Claude status | Look at status.claude.com to warn you about major incidents | on |
 | Mark | `symbol` (☊☋), `RD` if your terminal shows ☊☋ as boxes, or `none` | `symbol` |
+| Compare with RainDragon's server model | Sends each prompt's text (not the conversation) to inference.raindragon.ai and logs its prediction next to yours; see [PRIVACY.md](PRIVACY.md) | off |
+| Server model use | `shadow`: log only, keep showing your range. `server` / `blend`: show the server's range or a mix (after 10 turns with an answer; local on any error or after 0.8 s). `off` | `shadow` |
 
 **Chrome extension:** Extensions → RainDragon Forecast → Details → Extension
-options. The same settings, plus **Copy diagnostics** and **Clear my
-history**.
+options. The same settings (the server comparison is claude.ai only), plus
+**Copy diagnostics** and **Clear my history**.
 
 ## Turn it off, or remove it
 
@@ -187,7 +189,8 @@ When Forecast is off, it shows nothing and records nothing.
 
 Forecast keeps how long each turn took and rough size buckets (such as
 "short prompt"). It never stores your prompts, Claude's replies or file
-names, and none of it leaves your computer. The only thing it fetches from the
+names, and none of it leaves your computer unless you turn on the server
+comparison (off by default; it sends the prompt text). Otherwise the only thing it fetches from the
 internet is the public status page (status.claude.com, status.openai.com or
 Google's status dashboard), to warn you about incidents. Full details:
 [PRIVACY.md](PRIVACY.md). What we do and don't claim about it:

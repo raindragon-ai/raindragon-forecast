@@ -1,5 +1,7 @@
 const T = self.RainDragonEta;
-const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false };
+const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false,
+                   serverMode: "shadow", serverSendText: false };
+const SERVER_ORIGIN = { origins: [T.SERVER_URL + "/*"] };
 const $ = (id) => document.getElementById(id);
 const PROVS = Object.values(T.PROVIDERS);   // claude.ai, chatgpt.com, gemini.google.com: separate histories
 let state = { settings: DEFAULTS, histories: {} };
@@ -31,6 +33,8 @@ function render() {
   $("band").value = s.band;
   $("showResult").checked = !!s.showResult;
   $("checkStatus").checked = !!s.checkStatus;
+  $("serverSendText").checked = !!s.serverSendText;
+  $("serverMode").value = T.SERVER_MODES.includes(s.serverMode) ? s.serverMode : "shadow";
   $("count").textContent = "";
   $("eval").textContent = "";
   for (const p of PROVS) {
@@ -39,6 +43,14 @@ function render() {
     div.textContent = p.site + ": " + h.length + " replies saved on this device (" + T.learnedCount(h) +
       " used for forecasts; durations and word counts only); " + evalLine(h, s.band);
     $("count").appendChild(div);
+    const sv = T.evaluateServer(h, s.band);
+    if (sv.pairedReplies) {
+      const d2 = document.createElement("div");
+      const f = (b) => b.scored ? pct(b.within2x) + " within 2x, " + pct(b.coverage) + " inside the range (" + b.scored + ")" : "not yet";
+      d2.textContent = p.site + " with a server answer: " + sv.pairedReplies + " replies. Local: " + f(sv.local) +
+        ". Server: " + f(sv.server) + ". Mix: " + f(sv.blend) + ".";
+      $("count").appendChild(d2);
+    }
   }
 }
 
@@ -52,6 +64,7 @@ function diagnostics() {
       replies_in_incident: h.filter((r) => r.ok && r.incident).length,
       phase: good < T.MIN_READY ? "learning (no band yet)" : good < T.CONFIDENT ? "learning (wide band)" : "ready",
       coverage: e.coverage, scored: e.scored, median_ratio: e.medianRatio,
+      server: T.evaluateServer(h, state.settings.band),
     };
   }
   return JSON.stringify({
@@ -74,10 +87,24 @@ function save() {
   state.settings = {
     enabled: $("enabled").checked, band: $("band").value,
     showResult: $("showResult").checked, checkStatus: $("checkStatus").checked,
+    serverMode: $("serverMode").value, serverSendText: $("serverSendText").checked,
   };
   chrome.storage.local.set({ settings: state.settings }, () => { render(); flash("Saved"); });
 }
-["enabled", "band", "showResult", "checkStatus"].forEach((id) => $(id).addEventListener("change", save));
+["enabled", "band", "showResult", "checkStatus", "serverMode"].forEach((id) => $(id).addEventListener("change", save));
+
+// Sending prompt text needs the optional host permission; asked here, in the
+// click, because Chrome only allows the request from a user gesture.
+$("serverSendText").addEventListener("change", () => {
+  if (!$("serverSendText").checked) {
+    chrome.permissions.remove(SERVER_ORIGIN, () => save());
+    return;
+  }
+  chrome.permissions.request(SERVER_ORIGIN, (granted) => {
+    if (!granted) $("serverSendText").checked = false;
+    save();
+  });
+});
 
 $("copy").addEventListener("click", () => {
   navigator.clipboard.writeText(diagnostics()).then(() => flash("Copied"), () => flash("Copy failed"));

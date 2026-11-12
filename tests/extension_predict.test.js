@@ -167,3 +167,58 @@ test("ChatGPT heads-up: only a major outage of Conversations", () => {
   // and claude.ai never reacts to an OpenAI page
   assert.equal(T.incidentFromSummary(down), null);
 });
+
+// ---------- optional server comparison ----------
+
+const prec = (dur, tok, o = {}) => rec(dur, Object.assign({ srv_tok: tok }, o));
+
+test("server model is asked only with consent to send text, and never in off mode", () => {
+  assert.equal(T.serverActive({}), false);
+  assert.equal(T.serverActive({ serverMode: "shadow" }), false);
+  assert.equal(T.serverActive({ serverMode: "off", serverSendText: true }), false);
+  assert.equal(T.serverActive({ serverMode: "shadow", serverSendText: true }), true);
+  const b = T.serverBody("iid-12345678", "x".repeat(9000));
+  assert.equal(b.text.length, 8000);
+  assert.equal(b.share, false);
+  assert.deepEqual(Object.keys(b).sort(), ["client", "client_version", "install_id", "model", "share", "text"]);
+});
+
+test("shadow keeps showing the local band even with a good server answer", () => {
+  const h = Array.from({ length: 40 }, (_, i) => prec(10 + i, 100));
+  const local = T.predict(h, 50, 100, "Opus 5.5 Medium", "50");
+  const pick = T.chooseBand("shadow", local, h, { tok: 900, pid: "etp_x" }, "50");
+  assert.equal(pick.band, local);
+  assert.equal(pick.shown, "local");
+});
+
+test("server and blend fall back to local on error, junk, or too few paired replies", () => {
+  const few = Array.from({ length: 40 }, (_, i) => rec(10 + i));
+  const local = T.predict(few, 50, 100, "Opus 5.5 Medium", "50");
+  for (const mode of ["server", "blend"]) {
+    assert.equal(T.chooseBand(mode, local, few, null, "50").band, local);                 // error/timeout
+    assert.equal(T.chooseBand(mode, local, few, { tok: 300 }, "50").band, local);         // no pairs yet
+  }
+  assert.equal(T.serverAnswer({ detail: { code: "model_unavailable" } }), null);
+  assert.equal(T.serverAnswer({ prediction_id: "etp_1", output_tokens: 0 }), null);
+  assert.deepEqual(T.serverAnswer({ prediction_id: "etp_1", output_tokens: 12.4, model_version: "v" }),
+                   { pid: "etp_1", tok: 12, ver: "v" });
+});
+
+test("server mode shows the server band scaled by the user's own seconds per token", () => {
+  const h = Array.from({ length: 40 }, (_, i) => prec(50 + (i % 5), 100));   // ~0.5 s per token
+  const local = T.predict(h, 50, 100, "Opus 5.5 Medium", "50");
+  const s = T.chooseBand("server", local, h, { tok: 400 }, "50");
+  assert.equal(s.shown, "server");
+  assert.ok(s.band.dur.low > 190 && s.band.dur.high < 220);
+  const b = T.chooseBand("blend", local, h, { tok: 400 }, "50");
+  assert.equal(b.shown, "blend");
+  assert.ok(b.band.dur.low > local.dur.low && b.band.dur.high < s.band.dur.high);
+});
+
+test("evaluateServer compares local, server and blend on paired replies", () => {
+  const h = Array.from({ length: 30 }, (_, i) => prec(40 + i, 100, { loc: [30, 60] }));
+  const e = T.evaluateServer(h, "50");
+  assert.equal(e.pairedReplies, 30);
+  assert.equal(e.local.scored, 30);
+  assert.equal(e.server.scored, 30 - T.MIN_PAIRED);
+});

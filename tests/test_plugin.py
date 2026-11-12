@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "plugin", "scripts"))
 
 import raindragon_eta_hook as hook  # noqa: E402
-from raindragon_eta import fmt, predict, status, store  # noqa: E402
+from raindragon_eta import fmt, predict, server, status, store  # noqa: E402
 
 MARK = "\u260a\u260b "  # the Dragon's Head and Tail mark that starts every line
 
@@ -534,3 +534,144 @@ def test_stats_screen(env):
     assert lines[0] == MARK + "RainDragon Forecast · your last 40 turns"
     assert lines[1].startswith("  Inside the range") and lines[1].endswith("of 10 turns (aim 50%)")
     assert lines[2].split() == ["Typical", "turn", "1m"] and lines[3].split() == ["Longest", "turn", "1m"]
+
+
+# ---------- server comparison (server.py) ----------
+
+def senv(env, mode="shadow", send=True):
+    return dict(env, CLAUDE_PLUGIN_OPTION_SERVER_MODE=mode,
+                CLAUDE_PLUGIN_OPTION_SERVER_SEND_TEXT="true" if send else "false")
+
+
+def answer(tok=100):
+    return lambda url, body, timeout: {"prediction_id": "etp_" + "a" * 32, "output_tokens": tok,
+                                       "model_version": "tinylm-x"}
+
+
+def seed(env, n, tok=100, dur=50.0):
+    d = env["CLAUDE_PLUGIN_DATA"]
+    for i in range(n):
+        store.append_history(d, dict(rec(dur + i % 5), srv_tok=tok))
+
+
+def test_nothing_is_sent_without_consent_to_send_text(env):
+    posts, spawned = [], []
+    for mode in ("shadow", "server", "blend"):
+        hook.on_prompt(prompt(1), senv(env, mode, send=False), 0,
+                       post=lambda *a: posts.append(a), spawn=lambda *a: spawned.append(a))
+    assert posts == [] and spawned == []
+
+
+def test_shadow_asks_in_the_background_and_shows_only_local(env):
+    seed(env, 40)
+    local = hook.on_prompt(prompt(1), env, 0)
+    spawned = []
+    shadow = hook.on_prompt(prompt(2), senv(env), 0, post=answer(),
+                            spawn=lambda ev, d, job: spawned.append((ev, job)))
+    assert shadow == local                            # the displayed range is the local one
+    (ev, job), = spawned
+    assert ev == "server-predict" and job["body"]["text"] == "fix the test"
+    assert job["body"]["share"] is False and set(job["body"]) == {
+        "install_id", "client", "client_version", "model", "text", "share"}
+
+
+def test_shadow_answer_and_outcome_are_logged_with_the_turn(env):
+    e = senv(env)
+    hook.on_prompt(prompt(1), e, 1000, spawn=lambda *a: None)
+    # what the detached server-predict process leaves behind
+    server.write_result(env["CLAUDE_PLUGIN_DATA"], "s1",
+                        {"pid": "etp_" + "b" * 32, "tok": 321, "ver": "v", "ms": 80, "start": 1000})
+    sent = []
+    hook.on_stop({"session_id": "s1", "prompt_id": "p1"}, e, 1042, ok=True,
+                 spawn=lambda ev, d, job: sent.append((ev, job)))
+    r, = store.read_history(env["CLAUDE_PLUGIN_DATA"])
+    assert r["srv_tok"] == 321 and r["dur"] == 42.0 and "shown" not in r
+    (ev, job), = sent
+    assert ev == "server-outcome" and job["body"]["duration_ms"] == 42000
+    assert job["body"]["failed"] is False and job["body"]["prediction_id"] == "etp_" + "b" * 32
+
+
+def test_a_late_answer_for_another_turn_is_not_attached(env):
+    e = senv(env)
+    hook.on_prompt(prompt(1), e, 1000, spawn=lambda *a: None)
+    server.write_result(env["CLAUDE_PLUGIN_DATA"], "s1", {"pid": "etp_" + "c" * 32, "tok": 5, "start": 1})
+    sent = []
+    hook.on_stop({"session_id": "s1", "prompt_id": "p1"}, e, 1010, ok=True, spawn=lambda *a: sent.append(a))
+    r, = store.read_history(env["CLAUDE_PLUGIN_DATA"])
+    assert "srv_tok" not in r and sent == []
+
+
+@pytest.mark.parametrize("post", [
+    lambda u, b, t: (_ for _ in ()).throw(TimeoutError("timed out")),
+    lambda u, b, t: (_ for _ in ()).throw(OSError("network unreachable")),
+    lambda u, b, t: {"detail": {"code": "model_unavailable"}},          # 503 body / junk
+    lambda u, b, t: {"prediction_id": "etp_x", "output_tokens": -3},
+])
+@pytest.mark.parametrize("mode", ["server", "blend"])
+def test_server_and_blend_fall_back_to_local_on_any_failure(env, post, mode):
+    seed(env, 40)
+    local = hook.on_prompt(prompt(1), env, 0)
+    assert hook.on_prompt(prompt(2), senv(env, mode), 0, post=post) == local
+
+
+def test_server_mode_needs_paired_turns_before_it_shows_anything(env):
+    seed(env, predict.MIN_PAIRED - 1)
+    store.append_history(env["CLAUDE_PLUGIN_DATA"], rec(50))
+    local = hook.on_prompt(prompt(1), env, 0)
+    assert hook.on_prompt(prompt(2), senv(env, "server"), 0, post=answer()) == local
+
+
+def test_server_mode_shows_the_scaled_server_range(env):
+    seed(env, 40, tok=100, dur=50.0)                   # 0.5 s per predicted token
+    out = hook.on_prompt(prompt(1), senv(env, "server"), 0, post=answer(tok=400))
+    p = store.pop_pending(env["CLAUDE_PLUGIN_DATA"], "s1")
+    assert p["shown"] == "server" and 190 < p["low"] <= p["high"] < 220   # 400 x 0.5 s, spread 50-54 s
+    assert p["loc"] is not None and p["loc"][1] < 60                       # the local range is kept too
+    assert out.startswith(MARK + "Forecast ")
+
+
+def test_server_band_and_blend_math():
+    paired = [dict(rec(d), srv_tok=10) for d in (10, 20, 40, 80)] * 10
+    b = predict.server_band(paired, 20, "50")
+    assert b.group == "server" and b.low < 2 * 25 < b.high       # scale 2.5-ish s/token x 20
+    lb = predict.Band(4.0, 16.0, 40, "all", "50")
+    m = predict.blend(lb, predict.Band(16.0, 64.0, 40, "server", "50"))
+    assert (m.low, m.high) == (8.0, 32.0)
+    assert predict.blend(lb, None) is lb
+
+
+def test_eval_compares_local_and_server_on_paired_turns(env):
+    d = env["CLAUDE_PLUGIN_DATA"]
+    for i in range(30):
+        store.append_history(d, dict(rec(40 + i), srv_tok=100, loc=[30.0, 60.0]))
+    out = io.StringIO()
+    hook.main(["hook", "eval", "--data", d], io.StringIO(""), out, {}, now=0)
+    j = json.loads(out.getvalue())["server"]
+    assert j["paired_turns"] == 30 and j["local"]["scored"] == 30
+    assert j["server"]["scored"] == 30 - predict.MIN_PAIRED
+
+
+def test_shadow_never_writes_the_prompt_to_disk(env):
+    hook.on_prompt(dict(prompt(1), prompt="SECRET customer text"), senv(env), 0, spawn=lambda *a: None)
+    hook.on_stop({"session_id": "s1", "prompt_id": "p1"}, senv(env), 10, ok=True, spawn=lambda *a: None)
+    for root, _, files in os.walk(env["CLAUDE_PLUGIN_DATA"]):
+        for f in files:
+            assert "SECRET" not in open(os.path.join(root, f)).read()
+
+
+def test_server_predict_command_writes_numbers_only(env, monkeypatch):
+    d = env["CLAUDE_PLUGIN_DATA"]
+    monkeypatch.setattr(server, "_post", answer(tok=77))
+    job = {"sid": "s1", "start": 5, "url": "https://example.invalid",
+           "body": server.predict_body("iid-12345678", "0", "SECRET")}
+    hook.main(["hook", "server-predict", "--data", d], io.StringIO(json.dumps(job)), io.StringIO(), {})
+    res = server.pop_result(d, "s1")
+    assert res["tok"] == 77 and res["start"] == 5 and "SECRET" not in json.dumps(res)
+
+
+def test_doctor_reports_server_settings(env):
+    j = hook.doctor(senv(env, "blend"), 0)
+    assert j["server"]["mode"] == "blend" and j["server"]["active"] is True
+    assert hook.doctor(env, 0)["server"] == {"mode": "shadow", "send_text": False, "active": False,
+                                             "url": server.DEFAULT_URL, "turns_with_answer": 0,
+                                             "turns_with_error": 0}

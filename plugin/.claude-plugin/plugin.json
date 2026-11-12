@@ -46,6 +46,24 @@
       "title": "Mark",
       "description": "What starts each line: symbol (the ☊☋ Dragon's Head and Tail), RD (plain letters, if your terminal shows boxes) or none.",
       "default": "symbol"
+    },
+    "server_send_text": {
+      "type": "boolean",
+      "title": "Compare with RainDragon's server model (sends your prompt)",
+      "description": "Off by default. On: each prompt's text (first 8,000 characters; never the conversation, files or paths) is sent to inference.raindragon.ai, which predicts the reply length and does not keep the text. The answer is logged next to the local range so /forecast:eval can compare them. Nothing is sent while this is off.",
+      "default": false
+    },
+    "server_mode": {
+      "type": "string",
+      "title": "Server model use",
+      "description": "Only with the option above on. shadow (default): ask the server but keep showing your local range. server: show the server's range. blend: show a mix of both. off: never ask. server and blend fall back to the local range until 10 turns have a server answer, and on any error or after 0.8 s.",
+      "default": "shadow"
+    },
+    "server_url": {
+      "type": "string",
+      "title": "Server address",
+      "description": "Where the server model is. Leave as is.",
+      "default": "https://inference.raindragon.ai"
     }
   }
 }

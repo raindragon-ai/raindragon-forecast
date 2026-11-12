@@ -17,6 +17,9 @@
     "https://status.openai.com/*",
     "https://www.google.com/appsstatus/*"
   ],
+  "optional_host_permissions": [
+    "https://inference.raindragon.ai/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },

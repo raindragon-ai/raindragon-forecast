@@ -302,7 +302,104 @@
     return null;
   }
 
+  // ---- optional server comparison (claude.ai only; background.js sends) ----
+  //
+  // RainDragon's TinyLM API predicts reply TOKENS from the prompt TEXT, so it
+  // is asked only when the user turned on serverSendText (and granted the
+  // host permission). Its tokens are turned into seconds from the user's own
+  // replies that have an answer (srv_tok): median seconds per predicted token
+  // for the middle, the spread of actual/scaled for the range. shadow (the
+  // default mode) logs it and keeps showing the local range.
+
+  const SERVER_URL = "https://inference.raindragon.ai";
+  const SERVER_MODES = ["off", "shadow", "server", "blend"];
+  const MIN_PAIRED = 10;
+  const MAX_TEXT_CHARS = 8000;
+
+  function serverActive(settings) {
+    const s = settings || {};
+    return !!s.serverSendText && SERVER_MODES.includes(s.serverMode || "shadow") &&
+      (s.serverMode || "shadow") !== "off";
+  }
+
+  function serverBody(installId, text) {
+    return { install_id: installId, client: "extension", client_version: VERSION,
+             model: "claude", text: String(text || "").slice(0, MAX_TEXT_CHARS), share: false };
+  }
+
+  // A usable answer from /v1/eta/predict, or null.
+  function serverAnswer(j) {
+    if (!j || typeof j !== "object") return null;
+    const tok = j.output_tokens, pid = j.prediction_id;
+    if (typeof tok !== "number" || !(tok >= 1) || typeof pid !== "string" || !pid.startsWith("etp_")) return null;
+    return { pid: pid.slice(0, 40), tok: Math.round(tok), ver: String(j.model_version || "").slice(0, 40) };
+  }
+
+  function paired(history) {
+    return usable(history).filter((r) => typeof r.srv_tok === "number" && r.srv_tok >= 1);
+  }
+
+  function serverBandFrom(pairs, tokens, coverage) {
+    if (pairs.length < MIN_PAIRED || !(tokens >= 1)) return null;
+    coverage = BANDS[coverage] ? coverage : "50";
+    const learning = pairs.length < CONFIDENT;
+    if (learning) coverage = "80";
+    const scale = quantile(pairs.map((r) => r.dur / r.srv_tok).sort((a, b) => a - b), 0.5);
+    const res = pairs.map((r) => Math.log(r.dur / (r.srv_tok * scale))).sort((a, b) => a - b);
+    const [loQ, hiQ] = BANDS[coverage];
+    const mid = tokens * scale;
+    return { dur: { low: mid * Math.exp(quantile(res, loQ)), high: mid * Math.exp(quantile(res, hiQ)) },
+             words: null, n: pairs.length, group: "server", coverage, learning };
+  }
+
+  function serverBand(history, tokens, coverage) {
+    return serverBandFrom(paired(history), tokens, coverage);
+  }
+
+  function blendBands(local, srv) {
+    if (!local || !srv) return local || srv;
+    return { dur: { low: Math.sqrt(local.dur.low * srv.dur.low), high: Math.sqrt(local.dur.high * srv.dur.high) },
+             words: local.words, n: Math.min(local.n, srv.n), group: "blend", coverage: srv.coverage,
+             learning: local.learning || srv.learning };
+  }
+
+  // What to SHOW for a reply: {band, shown}. Shadow, off, an error, or too few
+  // paired replies all mean the local band, unchanged.
+  function chooseBand(mode, local, history, answer, coverage) {
+    if (!answer || (mode !== "server" && mode !== "blend")) return { band: local, shown: "local" };
+    const srv = serverBand(history, answer.tok, coverage);
+    if (!srv) return { band: local, shown: "local" };
+    if (mode === "server") return { band: srv, shown: "server" };
+    return local ? { band: blendBands(local, srv), shown: "blend" } : { band: local, shown: "local" };
+  }
+
+  // Live comparison on replies with a server answer: the local band recorded
+  // at the time (loc) vs the server band and blend from earlier paired replies.
+  function evaluateServer(history, coverage) {
+    const pairs = paired(history);
+    const acc = { local: [0, 0, 0], server: [0, 0, 0], blend: [0, 0, 0] };
+    pairs.forEach((r, i) => {
+      const loc = Array.isArray(r.loc) && r.loc.length === 2 && r.loc[0] > 0
+        ? { dur: { low: r.loc[0], high: r.loc[1] }, n: 0, learning: false } : null;
+      const srv = serverBandFrom(pairs.slice(Math.max(0, i - RECENT), i), r.srv_tok, coverage);
+      for (const [name, b] of [["local", loc], ["server", srv], ["blend", loc && srv ? blendBands(loc, srv) : null]]) {
+        if (!b || !(b.dur.low > 0)) continue;
+        const a = acc[name];
+        a[0] += 1;
+        if (b.dur.low <= r.dur && r.dur <= b.dur.high) a[1] += 1;
+        if (Math.abs(Math.log(Math.sqrt(b.dur.low * b.dur.high) / r.dur)) <= Math.log(2)) a[2] += 1;
+      }
+    });
+    const out = { pairedReplies: pairs.length };
+    for (const [k, [n, inside, w2]] of Object.entries(acc)) {
+      out[k] = { scored: n, coverage: n ? inside / n : null, within2x: n ? w2 / n : null };
+    }
+    return out;
+  }
+
   const api = {
+    SERVER_URL, SERVER_MODES, MIN_PAIRED, serverActive, serverBody, serverAnswer, serverBand,
+    blendBands, chooseBand, evaluateServer,
     VERSION, MIN_READY, CONFIDENT, MIN_GROUP, RECENT, BANDS,
     promptBucket, contextBucket, modelKey, quantile, usable, predict, evaluate, learnedCount,
     duration, words, wordsText, bandLine, clock, liveLine, doneLine, learningLine, incidentLine, incidentFromSummary, incidentFromGoogle, WEB_COMPONENTS, PROVIDERS,

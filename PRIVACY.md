@@ -106,9 +106,43 @@ off with **Check Claude status** (plugin), **Check Claude, ChatGPT and
 Gemini status** (extension) or `"check_status": false` in the CLI folder's
 `settings.json`.
 
-Nothing is sent to RainDragon. There is no telemetry, analytics or crash
-reporting. If we ever add a way to share timing data, it will be off by
-default, opt-in, and show you exactly what would be sent before anything is.
+Nothing is sent to RainDragon unless you turn on the server comparison
+below. There is no telemetry, analytics or crash reporting.
+
+### Optional: compare with RainDragon's server model (off by default)
+
+RainDragon runs a small model (TinyLM) that predicts how long a reply will be
+from the prompt's text. It needs the text, so it is never asked unless you
+turn on **Compare with RainDragon's server model** (plugin option
+`server_send_text`; in the extension, the options checkbox, which also asks
+Chrome for permission to reach `inference.raindragon.ai`). Claude Code and
+claude.ai only.
+
+With it on, for each prompt, `POST https://inference.raindragon.ai/v1/eta/predict`
+carries:
+
+| Sent | Example |
+| :- | :- |
+| The prompt you typed, first 8,000 characters | `fix the flaky test in parser_test.py` |
+| A random id made on your machine for this install | `3f0c2a9e-7b1d-...` |
+| Which client and version | `plugin`, `0.2.0` |
+| The model name, always the word `claude` | `claude` |
+| `share: false`: the server must not keep the text | `false` |
+
+Never sent: the conversation before the prompt, Claude's replies, file
+names, paths, the session id, your account. The server uses the text to make
+its prediction and drops it; it keeps the numbers (sizes, its prediction, the
+real duration) to measure itself. When the turn ends,
+`POST /v1/eta/outcome` carries the prediction's id, the same install id, the
+turn's duration and whether it failed.
+
+The answer (a number of tokens) is saved in your local history next to the
+local range, as `srv_tok`, so `/forecast:eval` (and the extension's options
+page) can show which was closer on your own turns. **Server model use**
+chooses what you see: `shadow` (default) keeps showing your local range;
+`server` or `blend` show the server's range or a mix, only after 10 turns
+have a server answer, and fall back to the local range whenever the server
+is slow, offline or answers with anything unexpected.
 
 ## Diagnostics
 
@@ -121,7 +155,8 @@ content. You choose whether to share them.
 * Extension: **Clear my history** in its options (clears claude.ai,
   chatgpt.com and gemini.google.com), or remove the extension.
 * Plugin: delete `~/.claude/plugins/data/forecast*` and `~/.raindragon-forecast` (and
-  uninstall it if you like).
+  uninstall it if you like). Deleting `install_id` there gives you a new random
+  id; the server's rows under the old one are no longer linked to you.
 * Codex / Gemini CLI: delete `~/.codex/raindragon-forecast` or
   `~/.gemini/raindragon-forecast` (and the hook entries). Codex's own session logs
   are Codex's; the script never writes to them.

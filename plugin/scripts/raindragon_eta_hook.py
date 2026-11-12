@@ -28,7 +28,11 @@ Also run by hand (or via the plugin's slash commands):
   stats             plain-text summary for /forecast:stats: how often the
                     range held, typical and longest turn
   eval              the same measurement as JSON (coverage and band width),
-                    replayed in order
+                    replayed in order; with server answers in history, also
+                    local vs server vs blend on those turns
+  server-predict    started detached by the prompt hook in server shadow mode
+  server-outcome    started detached by the Stop hook: the real duration
+                    (server.py; both get their payload on stdin)
 
 Kill switch: the plugin option "enabled" (in /config) or RAINDRAGON_FORECAST_OFF=1
 (the old RAINDRAGON_ETA_OFF=1 still works).
@@ -51,7 +55,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from raindragon_eta import __version__, fmt, hosts, predict, status, store  # noqa: E402
+from raindragon_eta import __version__, fmt, hosts, predict, server, status, store  # noqa: E402
 
 NAME = "RainDragon Forecast"
 #: The mark that starts every line: the Dragon's Head and Tail symbols. The
@@ -124,7 +128,34 @@ def _settle_unfinished(d: str, sid: str, p: dict, host: str) -> None:
     store.append_history(d, rec)
 
 
-def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude") -> str:
+def _server_side(d: str, sid: str, prompt_text: str, history: list, band, coverage: str,
+                 env: dict, now: float, post=None, spawn=None):
+    """(band to show, which one it is). Never raises; local on any failure."""
+    cfg = server.settings(env)
+    sidf = store._safe(sid)
+    server.pop_result(d, sidf)            # a late answer for an earlier turn
+    if not server.active(cfg) or not prompt_text.strip():
+        return band, "local"
+    body = server.predict_body(server.install_id(d), __version__, prompt_text)
+    if cfg["mode"] == "shadow":
+        try:
+            (spawn or server.spawn)("server-predict", d,
+                                    {"sid": sidf, "start": now, "url": cfg["url"], "body": body})
+        except Exception:  # noqa: BLE001
+            pass
+        return band, "local"
+    res = server.ask(cfg, body, server.PROMPT_TIMEOUT_S, post)
+    server.write_result(d, sidf, dict(res, start=now))
+    srv = predict.server_band(history, res["tok"], coverage) if "tok" in res else None
+    if not srv:
+        return band, "local"
+    if cfg["mode"] == "server":
+        return srv, "server"
+    return (predict.blend(band, srv), "blend") if band else (band, "local")
+
+
+def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude",
+              post=None, spawn=None) -> str:
     d = store.data_dir(env)
     store.cleanup(d, now)
     if host != "claude":
@@ -156,7 +187,11 @@ def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude"
                                                host=host, **kw)
 
     history = store.read_history(d)
-    band = predict.predict(history, pc, tb, effort, coverage)
+    local = predict.predict(history, pc, tb, effort, coverage)
+    band, shown = local, "local"
+    if host == "claude":
+        band, shown = _server_side(d, sid, inp.get("prompt") or "", history, local, coverage,
+                                   env, now, post, spawn)
 
     pending = {
         "prompt_id": hosts.turn_key(inp, host), "start": now,
@@ -166,6 +201,8 @@ def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude"
         "n": band.n if band else None, "learning": bool(band.learning) if band else None,
         "learned": predict.learned_count(history),
         "mark": mark(env),   # for the live status line, which gets no plugin options
+        "loc": [round(local.low, 2), round(local.high, 2)] if local else None,
+        "shown": shown,
     }
     if host == "codex" and inp.get("transcript_path"):
         # kept only to look up this turn's outcome if its Stop never comes
@@ -193,8 +230,32 @@ def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude"
     return "\n".join(mark(env) + line for line in lines)
 
 
+def _attach_server(d: str, sid: str, p: dict, rec: dict, dur: float, ok: bool, env: dict,
+                   spawn=None) -> None:
+    """Copy this turn's server answer (numbers only) into the history record and
+    send the real duration back. Answers for another turn are ignored."""
+    res = server.pop_result(d, store._safe(sid))
+    if p.get("loc"):
+        rec["loc"] = p["loc"]
+    if p.get("shown") and p["shown"] != "local":
+        rec["shown"] = p["shown"]
+    if not res or res.get("start") != p.get("start"):
+        return
+    if "tok" in res:
+        rec.update(srv_tok=res["tok"], srv_ms=res.get("ms"), srv_ver=res.get("ver"))
+        cfg = server.settings(env)
+        if server.active(cfg) and res.get("pid"):
+            try:
+                (spawn or server.spawn)("server-outcome", d, {"url": cfg["url"], "body": server.outcome_body(
+                    server.install_id(d), res["pid"], dur, ok)})
+            except Exception:  # noqa: BLE001
+                pass
+    elif res.get("err"):
+        rec["srv_err"] = str(res["err"])[:20]
+
+
 def on_stop(inp: dict, env: dict, now: float, ok: bool, host: str = "claude",
-            error: str = None) -> str:
+            error: str = None, spawn=None) -> str:
     d = store.data_dir(env)
     p = store.pop_pending(d, inp.get("session_id") or "")
     if not p:
@@ -209,6 +270,8 @@ def on_stop(inp: dict, env: dict, now: float, ok: bool, host: str = "claude",
            "effort": p.get("effort"), "ok": ok, "incident": bool(p.get("incident"))}
     if not ok:
         rec["error"] = error or inp.get("error_type") or "unknown"
+    if host == "claude":
+        _attach_server(d, inp.get("session_id") or "", p, rec, dur, ok, env, spawn)
     store.append_history(d, rec)
     if ok and _flag(env, "SHOW_RESULT", False):
         return mark(env) + fmt.done_line(dur, p.get("low"), p.get("high"))
@@ -234,7 +297,11 @@ def doctor(env: dict, now: float, host: str = "claude") -> dict:
     # Slash commands do not get the plugin options, so report the settings the
     # last prompt hook saw (None before the first prompt).
     seen = store.read_json(d, "settings_seen.json")
+    cfg = server.settings(env)
     return {
+        "server": {"mode": cfg["mode"], "send_text": cfg["send_text"], "active": server.active(cfg),
+                   "url": cfg["url"], "turns_with_answer": sum(1 for r in h if r.get("srv_tok")),
+                   "turns_with_error": sum(1 for r in h if r.get("srv_err"))},
         "name": "raindragon-forecast", "version": __version__, "host": host,
         "settings": seen,
         "data_dir": d,
@@ -310,7 +377,23 @@ def main(argv, stdin, stdout, env, now=None) -> int:
         if event == "eval":
             d = store.data_dir(env)
             cov = env.get("CLAUDE_PLUGIN_OPTION_BAND") or "50"
-            stdout.write(json.dumps(predict.evaluate(store.read_history(d), cov), indent=2) + "\n")
+            h = store.read_history(d)
+            out = predict.evaluate(h, cov)
+            if any(r.get("srv_tok") for r in h):
+                out["server"] = predict.evaluate_server(h, cov)
+            stdout.write(json.dumps(out, indent=2) + "\n")
+            return 0
+        if event in ("server-predict", "server-outcome"):
+            job = json.loads(stdin.read() or "{}")
+            url = str(job.get("url") or "")
+            if not isinstance(job.get("body"), dict) or not url:
+                return 0
+            if event == "server-outcome":
+                server.tell(url, job["body"])
+                return 0
+            res = server.ask({"url": url}, job["body"], server.BACKGROUND_TIMEOUT_S)
+            server.write_result(store.data_dir(env), store._safe(str(job.get("sid") or "")),
+                                dict(res, start=job.get("start")))
             return 0
         if not enabled(env):
             return 0

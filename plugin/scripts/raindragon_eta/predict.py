@@ -37,6 +37,7 @@ the next normal turn, and counting them is what used to inflate the band.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
@@ -44,6 +45,7 @@ MIN_READY = 10       # good turns before we show any band
 CONFIDENT = 30       # good turns before we show the narrower band the user chose
 MIN_GROUP = 8        # turns a narrower group needs before we trust it
 RECENT = 300         # only the most recent turns: pace drifts with model and work
+MIN_PAIRED = 10      # turns with a server answer before its range can be shown
 
 BANDS = {"50": (0.25, 0.75), "80": (0.10, 0.90)}
 
@@ -162,3 +164,71 @@ def evaluate(history: Iterable[dict], coverage: str = "50") -> dict:
 
 def learned_count(history: Iterable[dict]) -> int:
     return len(usable(history))
+
+
+# ---------- server comparison (server.py) ----------
+#
+# The server answers in reply TOKENS, not seconds. Its range is turned into
+# time the same way the local one is built: from this user's own turns that
+# have a server answer, seconds-per-predicted-token (median) gives the scale and
+# the spread of actual/scaled gives the range. Until MIN_PAIRED such turns,
+# there is no server range and the local one is shown.
+
+def _paired(history: Iterable[dict]) -> list:
+    return [r for r in usable(history)
+            if isinstance(r.get("srv_tok"), (int, float)) and r["srv_tok"] >= 1]
+
+
+def _server_band(paired: list, tokens: float, coverage: str) -> Optional[Band]:
+    if len(paired) < MIN_PAIRED or not tokens or tokens < 1:
+        return None
+    learning = len(paired) < CONFIDENT
+    if learning:
+        coverage = "80"
+    scale = quantile(sorted(r["dur"] / r["srv_tok"] for r in paired), 0.5)
+    res = sorted(math.log(r["dur"] / (r["srv_tok"] * scale)) for r in paired)
+    lo_q, hi_q = BANDS.get(coverage, BANDS["50"])
+    mid = tokens * scale
+    return Band(mid * math.exp(quantile(res, lo_q)), mid * math.exp(quantile(res, hi_q)),
+                len(paired), "server", coverage, learning)
+
+
+def server_band(history: Iterable[dict], tokens: float, coverage: str = "50") -> Optional[Band]:
+    return _server_band(_paired(history), tokens, coverage)
+
+
+def blend(local: Optional[Band], srv: Optional[Band]) -> Optional[Band]:
+    """Geometric mean of the two ranges; either alone when the other is missing."""
+    if not local or not srv:
+        return local or srv
+    return Band(math.sqrt(local.low * srv.low), math.sqrt(local.high * srv.high),
+                min(local.n, srv.n), "blend", srv.coverage, local.learning or srv.learning)
+
+
+def evaluate_server(history: Iterable[dict], coverage: str = "50") -> dict:
+    """Live comparison on the user's own turns that have a server answer: the
+    local range recorded at the time ("loc") vs the server range and the blend
+    built only from earlier paired turns. Coverage = share of turns inside the
+    range; within_2x = share where the range's geometric middle is within 2x of
+    the real duration."""
+    paired = _paired(history)
+    acc = {k: [0, 0, 0, []] for k in ("local", "server", "blend")}  # scored, inside, w2x, ratios
+    for i, r in enumerate(paired):
+        loc = r.get("loc")
+        local = Band(loc[0], loc[1], 0, "local", coverage) if isinstance(loc, list) and len(loc) == 2 \
+            and all(isinstance(x, (int, float)) and x > 0 for x in loc) else None
+        srv = _server_band(paired[max(0, i - RECENT):i], r["srv_tok"], coverage)
+        for name, b in (("local", local), ("server", srv), ("blend", blend(local, srv) if local and srv else None)):
+            if not b or b.low <= 0:
+                continue
+            a = acc[name]
+            a[0] += 1
+            a[1] += b.low <= r["dur"] <= b.high
+            a[2] += abs(math.log(math.sqrt(b.low * b.high) / r["dur"])) <= math.log(2)
+            a[3].append(b.high / b.low)
+    out = {"paired_turns": len(paired)}
+    for name, (n, inside, w2, ratios) in acc.items():
+        out[name] = {"scored": n, "coverage": inside / n if n else None,
+                     "within_2x": w2 / n if n else None,
+                     "median_ratio": quantile(sorted(ratios), 0.5) if ratios else None}
+    return out

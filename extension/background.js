@@ -34,7 +34,43 @@ async function currentIncident(providerId) {
   return incident;
 }
 
+// Optional server comparison (content.js, only with the user's consent to send
+// the prompt text, and only once they granted the optional host permission).
+// Every failure is {err}: the content script then keeps the local band.
+const SERVER_TIMEOUT_MS = 5000;
+
+async function serverPost(path, body) {
+  const T = self.RainDragonEta;
+  const origin = T.SERVER_URL + "/*";
+  const t0 = Date.now();
+  try {
+    const ok = await chrome.permissions.contains({ origins: [origin] });
+    if (!ok) return { err: "no_permission" };
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), SERVER_TIMEOUT_MS);
+    const resp = await fetch(T.SERVER_URL + path, {
+      method: "POST", body: JSON.stringify(body), signal: ctl.signal, credentials: "omit",
+      headers: { "Content-Type": "application/json" },
+    });
+    clearTimeout(t);
+    if (!resp.ok) return { err: "http_" + resp.status, ms: Date.now() - t0 };
+    if (resp.status === 204) return { ok: true };
+    const a = T.serverAnswer(await resp.json());
+    return a ? Object.assign(a, { ms: Date.now() - t0 }) : { err: "bad_answer", ms: Date.now() - t0 };
+  } catch (e) {
+    return { err: e && e.name === "AbortError" ? "timeout" : "error", ms: Date.now() - t0 };
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+  if (msg && msg.type === "eta_predict" && msg.body) {
+    serverPost("/v1/eta/predict", msg.body).then(reply);
+    return true;
+  }
+  if (msg && msg.type === "eta_outcome" && msg.body) {
+    serverPost("/v1/eta/outcome", msg.body).then(reply);
+    return true;
+  }
   if (msg && msg.type === "status") {
     currentIncident(msg.provider || "claude").then((incident) => reply({ incident }));
     return true; // async reply

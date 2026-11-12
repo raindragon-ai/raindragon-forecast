@@ -35,6 +35,17 @@
 <label><input type="checkbox" id="showResult"> Show how long each reply really took</label>
 <label><input type="checkbox" id="checkStatus"> Check Claude, ChatGPT and Gemini status</label>
 <div class="hint">Reads status.claude.com (on claude.ai) and status.openai.com (on chatgpt.com) and Google's status dashboard, www.google.com/appsstatus (on gemini.google.com), every 2 minutes, and shows a storm warning during a major incident.</div>
+<label><input type="checkbox" id="serverSendText"> Compare with RainDragon's server model on claude.ai (sends your prompt)</label>
+<div class="hint">Off by default. On: the text of each claude.ai prompt you send (first 8,000 characters; never the conversation, replies or chat names) goes to inference.raindragon.ai, which predicts the reply length and does not keep the text. Chrome asks for permission to reach that site. Its answer is logged next to your local range (numbers only) so you can see which is closer.</div>
+<label>Server model use
+  <select id="serverMode">
+    <option value="shadow">Log only, keep showing my local range</option>
+    <option value="blend">Show a mix of the server and my local range</option>
+    <option value="server">Show the server's range</option>
+    <option value="off">Never ask</option>
+  </select>
+</label>
+<div class="hint">The server and mix options wait for 10 replies with a server answer, and use your local range whenever the server is slow, offline or wrong-shaped.</div>
 <div class="box">
   <div id="count"></div>
   <div id="eval"></div>

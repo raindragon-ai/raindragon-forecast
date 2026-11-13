@@ -31,6 +31,18 @@ For each finished turn it keeps:
 | Reply length in words (extension) | `350` |
 | Whether it failed (and, in Codex, the error kind), or ran during an incident | `"ok": true, "incident": false`, `"error": "server_overloaded"` |
 
+Per session, the plugin and CLI hooks also keep a small file in `sessions/`
+with numbers only: how many prompts the session has had and the end time and
+duration of its last 10 turns (`{"n": 4, "k": 3, "done": [[1791445010, 41.2], ...]}`),
+named by the session id like the other markers and deleted after two days.
+Each finished turn also stores the global model's range shown for it
+(`"glb": [20.1, 95.3]`), so Forecast can tell which range has been closer for you.
+
+The global model (`turn_model.json`, shipped with the plugin) was trained
+offline on public coding-agent sessions. It contains numbers only, no text from
+anyone's prompts, and runs on your machine; nothing about your turns is sent
+to train or run it.
+
 The plugin also writes one file outside that folder, `~/.raindragon-forecast/data_dir`,
 holding only the path of the folder above, so the live status line can find
 the turn in progress.

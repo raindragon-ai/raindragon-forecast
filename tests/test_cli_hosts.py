@@ -38,6 +38,12 @@ def run(event, payload, env, now, host):
 
 
 @pytest.fixture(autouse=True)
+def local_rule(monkeypatch):
+    """These tests pin the local rule; the global model has its own tests."""
+    monkeypatch.setattr(hook, "DEFAULT_MODEL", "local")
+
+
+@pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     """Status checks default on; never let a test start a real fetch."""
     monkeypatch.setattr(status, "_spawn_refresh", lambda *a, **k: None)

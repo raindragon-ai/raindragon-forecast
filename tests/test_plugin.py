@@ -169,8 +169,9 @@ def run(event, payload, env, now):
 
 @pytest.fixture
 def env(tmp_path):
+    # the local rule; the global model has its own tests (test_turn_model.py)
     return {"CLAUDE_PLUGIN_DATA": str(tmp_path), "CLAUDE_PLUGIN_OPTION_CHECK_STATUS": "false",
-            "HOME": str(tmp_path / "home")}
+            "HOME": str(tmp_path / "home"), "CLAUDE_PLUGIN_OPTION_MODEL": "local"}
 
 
 def prompt(i, sid="s1"):
@@ -494,7 +495,7 @@ def test_codex_old_folder_and_settings_are_copied(tmp_path):
     with open(os.path.join(old, "history.jsonl"), "w") as f:
         f.write(json.dumps(rec(40)) + "\n")
     with open(os.path.join(old, "settings.json"), "w") as f:
-        json.dump({"mark": "rd"}, f)
+        json.dump({"mark": "rd", "model": "local"}, f)
     env = {"HOME": home, "CLAUDE_PLUGIN_OPTION_CHECK_STATUS": "false"}
     out = io.StringIO()
     hook.main(["hook", "prompt", "--host", "codex"], io.StringIO(json.dumps(

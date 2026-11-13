@@ -55,7 +55,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from raindragon_eta import __version__, fmt, hosts, predict, server, status, store  # noqa: E402
+from raindragon_eta import __version__, fmt, hosts, predict, server, status, store, turn_model  # noqa: E402
 
 NAME = "RainDragon Forecast"
 #: The mark that starts every line: the Dragon's Head and Tail symbols. The
@@ -98,7 +98,17 @@ def _settings(env: dict) -> dict:
     return {"enabled": enabled(env), "band": env.get("CLAUDE_PLUGIN_OPTION_BAND") or "50",
             "show_result": _flag(env, "SHOW_RESULT", False),
             "check_status": _flag(env, "CHECK_STATUS", True),
-            "mark": env.get("CLAUDE_PLUGIN_OPTION_MARK") or "symbol"}
+            "mark": env.get("CLAUDE_PLUGIN_OPTION_MARK") or "symbol", "model": model_setting(env)}
+
+
+DEFAULT_MODEL = "global"
+
+
+def model_setting(env: dict) -> str:
+    """global (default): the shared model from the first turn, local when the
+    user's own history has been the better guess lately. local: the old rule."""
+    v = (env.get("CLAUDE_PLUGIN_OPTION_MODEL") or DEFAULT_MODEL).strip().lower()
+    return v if v in ("global", "local") else DEFAULT_MODEL
 
 
 #: Our own slash commands are not turns worth timing. The old prefix stays
@@ -129,13 +139,13 @@ def _settle_unfinished(d: str, sid: str, p: dict, host: str) -> None:
 
 
 def _server_side(d: str, sid: str, prompt_text: str, history: list, band, coverage: str,
-                 env: dict, now: float, post=None, spawn=None):
-    """(band to show, which one it is). Never raises; local on any failure."""
+                 env: dict, now: float, post=None, spawn=None, shown: str = "local"):
+    """(band to show, which one it is). Never raises; `band` on any failure."""
     cfg = server.settings(env)
     sidf = store._safe(sid)
     server.pop_result(d, sidf)            # a late answer for an earlier turn
     if not server.active(cfg) or not prompt_text.strip():
-        return band, "local"
+        return band, shown
     body = server.predict_body(server.install_id(d), __version__, prompt_text)
     if cfg["mode"] == "shadow":
         try:
@@ -143,15 +153,15 @@ def _server_side(d: str, sid: str, prompt_text: str, history: list, band, covera
                                     {"sid": sidf, "start": now, "url": cfg["url"], "body": body})
         except Exception:  # noqa: BLE001
             pass
-        return band, "local"
+        return band, shown
     res = server.ask(cfg, body, server.PROMPT_TIMEOUT_S, post)
     server.write_result(d, sidf, dict(res, start=now))
     srv = predict.server_band(history, res["tok"], coverage) if "tok" in res else None
     if not srv:
-        return band, "local"
+        return band, shown
     if cfg["mode"] == "server":
         return srv, "server"
-    return (predict.blend(band, srv), "blend") if band else (band, "local")
+    return (predict.blend(band, srv), "blend") if band else (band, shown)
 
 
 def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude",
@@ -188,10 +198,18 @@ def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude"
 
     history = store.read_history(d)
     local = predict.predict(history, pc, tb, effort, coverage)
-    band, shown = local, "local"
+    glb = None
+    if model_setting(env) == "global":
+        try:
+            f = turn_model.features(pc, tb, effort, history, store.read_session(d, sid), now)
+            glb = turn_model.band(turn_model.load(), f, predict.learned_count(history), coverage)
+        except Exception:  # noqa: BLE001
+            glb = None
+    store.session_prompted(d, sid)
+    band, shown = turn_model.choose(glb, local, history)
     if host == "claude":
-        band, shown = _server_side(d, sid, inp.get("prompt") or "", history, local, coverage,
-                                   env, now, post, spawn)
+        band, shown = _server_side(d, sid, inp.get("prompt") or "", history, band, coverage,
+                                   env, now, post, spawn, shown)
 
     pending = {
         "prompt_id": hosts.turn_key(inp, host), "start": now,
@@ -202,6 +220,7 @@ def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude"
         "learned": predict.learned_count(history),
         "mark": mark(env),   # for the live status line, which gets no plugin options
         "loc": [round(local.low, 2), round(local.high, 2)] if local else None,
+        "glb": [round(glb.low, 2), round(glb.high, 2)] if glb else None,
         "shown": shown,
     }
     if host == "codex" and inp.get("transcript_path"):
@@ -214,7 +233,8 @@ def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude"
             store.write_json(d, "learned.json", {"said": False})
     lines = []
     if band:
-        lines.append(fmt.band_line(band.low, band.high, band.n, band.coverage, band.learning))
+        lines.append(fmt.band_line(band.low, band.high, band.n, band.coverage, band.learning,
+                                   band.group))
         if not band.learning and store.read_json(d, "learned.json") == {"said": False}:
             # once ever, and only to someone who saw the learning phase (not a
             # RainDragon ETA user whose copied history is already past it).
@@ -235,10 +255,6 @@ def _attach_server(d: str, sid: str, p: dict, rec: dict, dur: float, ok: bool, e
     """Copy this turn's server answer (numbers only) into the history record and
     send the real duration back. Answers for another turn are ignored."""
     res = server.pop_result(d, store._safe(sid))
-    if p.get("loc"):
-        rec["loc"] = p["loc"]
-    if p.get("shown") and p["shown"] != "local":
-        rec["shown"] = p["shown"]
     if not res or res.get("start") != p.get("start"):
         return
     if "tok" in res:
@@ -270,9 +286,15 @@ def on_stop(inp: dict, env: dict, now: float, ok: bool, host: str = "claude",
            "effort": p.get("effort"), "ok": ok, "incident": bool(p.get("incident"))}
     if not ok:
         rec["error"] = error or inp.get("error_type") or "unknown"
+    for k in ("loc", "glb"):
+        if p.get(k):
+            rec[k] = p[k]
+    if p.get("shown") and p["shown"] != "local":
+        rec["shown"] = p["shown"]
     if host == "claude":
         _attach_server(d, inp.get("session_id") or "", p, rec, dur, ok, env, spawn)
     store.append_history(d, rec)
+    store.session_finished(d, inp.get("session_id") or "", now, dur)
     if ok and _flag(env, "SHOW_RESULT", False):
         return mark(env) + fmt.done_line(dur, p.get("low"), p.get("high"))
     return ""
@@ -312,6 +334,9 @@ def doctor(env: dict, now: float, host: str = "claude") -> dict:
         "phase": ("learning (no band yet)" if good < predict.MIN_READY
                   else "learning (wide band)" if good < predict.CONFIDENT else "ready"),
         "turns_in_progress": pending,
+        "model": {"setting": model_setting(env), "file": bool(turn_model.load()),
+                  "version": (turn_model.load() or {}).get("version"),
+                  "turns_with_global": sum(1 for r in h if r.get("glb"))},
         "status_cache_age_s": cache_age,
         "python": sys.version.split()[0],
         "made_by": MADE_BY,
@@ -381,6 +406,8 @@ def main(argv, stdin, stdout, env, now=None) -> int:
             out = predict.evaluate(h, cov)
             if any(r.get("srv_tok") for r in h):
                 out["server"] = predict.evaluate_server(h, cov)
+            if any(r.get("glb") for r in h):
+                out["global_model"] = turn_model.evaluate_live(h)
             stdout.write(json.dumps(out, indent=2) + "\n")
             return 0
         if event in ("server-predict", "server-outcome"):

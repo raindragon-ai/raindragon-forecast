@@ -34,9 +34,13 @@ def clock(seconds: float) -> str:
     return "%d:%02d:%02d" % (h, m, ss) if h else "%d:%02d" % (m, ss)
 
 
-def band_line(low: float, high: float, n: int, coverage: str, learning: bool = False) -> str:
-    """Forecast 40s–3m · half of your similar turns (57)"""
+def band_line(low: float, high: float, n: int, coverage: str, learning: bool = False,
+              group: str = "") -> str:
+    """Forecast 40s–3m · half of your similar turns (57)
+    Forecast 40s–3m · half of turns like this  (the global model)"""
     share = "half" if coverage == "50" else "8 in 10"
+    if group == "global":
+        return "Forecast %s · %s of turns like this" % (span(low, high), share)
     tail = "%d, still learning" % n if learning else "%d" % n
     return "Forecast %s · %s of your similar turns (%s)" % (span(low, high), share, tail)
 

@@ -10,8 +10,9 @@ are. If Claude has a major outage, you get a storm warning, so you know a slow
 turn is not your fault.
 
 It works in Claude Code and, with the Chrome extension, on claude.ai,
-chatgpt.com and gemini.google.com. It learns from your own history only, and
-that history stays on your computer.
+chatgpt.com and gemini.google.com. Your history stays on your computer. In
+Claude Code it also has a shared model that runs locally, so there is a range
+from your first turn (see [The first few turns](#the-first-few-turns)).
 
 ☊☋ are old astronomers' symbols for the Dragon's Head and Tail. You'll see
 them at the start of every Forecast line.
@@ -79,11 +80,30 @@ tested on the live site (see [docs/PROVIDERS.md](docs/PROVIDERS.md)).
 
 Forecast needs some history before it can say anything useful:
 
-| Turns so far | What you see |
+In Claude Code and the Codex / Gemini CLI hooks, Forecast now shows a range
+from your **first** turn. It comes from one model shared by everyone (trained
+on public coding-agent sessions from 337 people; it holds numbers only), which
+reads this prompt's length, this session's earlier turns and, once you have
+some, your own recent turns:
+
+```
+☊☋ Forecast 20s–2m · half of turns like this
+```
+
+On people it never saw, the middle of that range was within 2x of the real
+time more often than the per-user lookup (39.8% vs 35.8%), and about half of
+turns landed inside it. After 30 turns, Forecast keeps checking both ranges
+against your finished turns and shows whichever has been closer for you over
+the last 50. Set **Range source** to `local` for the old rule:
+
+| Turns so far | What you see with `local` |
 | :- | :- |
 | 0–9 | "RainDragon Forecast is learning your pace. Ranges start after 10 turns." (once per session) |
 | 10–29 | a wider range (8 in 10 of your similar turns), marked "still learning" |
 | 30 and up | the normal range (half of your similar turns), and one "Forecast has your pace" message |
+
+The extension (claude.ai, chatgpt.com, gemini.google.com) still uses the
+per-user rule: the shared model was trained on agent turns, not chat replies.
 
 Turns that fail, turns you stop, and turns during a major Claude incident are
 left out, so they never stretch your range.
@@ -167,6 +187,7 @@ Chrome stores the history inside the extension.
 | Show actual time | After each turn, say how long it really took and whether that was inside the forecast | off |
 | Check Claude status | Look at status.claude.com to warn you about major incidents | on |
 | Mark | `symbol` (☊☋), `RD` if your terminal shows ☊☋ as boxes, or `none` | `symbol` |
+| Range source | `global`: the shared model from your first turn, or your own history once it has been closer for you. `local`: only your own history | `global` |
 | Compare with RainDragon's server model | Sends each prompt's text (not the conversation) to inference.raindragon.ai and logs its prediction next to yours; see [PRIVACY.md](PRIVACY.md) | off |
 | Server model use | `shadow`: log only, keep showing your range. `server` / `blend`: show the server's range or a mix (after 10 turns with an answer; local on any error or after 0.8 s). `off` | `shadow` |
 

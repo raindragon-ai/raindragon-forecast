@@ -47,6 +47,12 @@
       "description": "What starts each line: symbol (the ☊☋ Dragon's Head and Tail), RD (plain letters, if your terminal shows boxes) or none.",
       "default": "symbol"
     },
+    "model": {
+      "type": "string",
+      "title": "Range source",
+      "description": "global (default): a range from your first turn, from a model shared by everyone that runs on your machine and reads only numbers (prompt length, this session's turn times, your recent turn times); after 30 turns, your own history is used whenever it has been closer for you. local: only your own past turns, nothing until 10 turns.",
+      "default": "global"
+    },
     "server_send_text": {
       "type": "boolean",
       "title": "Compare with RainDragon's server model (sends your prompt)",

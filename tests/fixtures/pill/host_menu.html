@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>host fixture</title>
+<style>
+ body{margin:0;font:14px system-ui;background:#faf9f5;color:#222;height:100vh;overflow:hidden}
+ .side{position:fixed;left:0;top:0;bottom:0;width:220px;background:#f0eee6;border-right:1px solid #ddd;padding:12px;box-sizing:border-box}
+ .main{position:absolute;left:220px;right:0;top:0;bottom:0}
+ .transcript{padding:24px 80px;color:#555}
+ .msg{margin:12px 0;padding:10px;background:#fff;border-radius:8px}
+ fieldset{position:absolute;left:80px;right:80px;bottom:24px;border:1px solid #ccc;border-radius:16px;background:#fff;padding:12px;min-height:80px;margin:0}
+ .row{position:absolute;bottom:8px;left:12px;right:12px;display:flex;justify-content:space-between}
+ button{font:13px system-ui;border:1px solid #ccc;background:#fff;border-radius:8px;padding:4px 10px}
+ [data-radix-popper-content-wrapper]{position:fixed;z-index:50}
+ [role=menu]{background:#fff;border:1px solid #bbb;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.2);padding:6px;width:260px}
+ [role=menuitem]{padding:7px 10px;border-radius:6px}
+ [role=menuitem]:hover{background:#eee}
+</style></head><body>
+<div class="side"><b>Chats</b><div class="msg">Example chat</div></div>
+<div class="main">
+ <div class="transcript">
+  <div class="msg">Example question about something.</div>
+  <div class="msg">Example answer with a few lines of placeholder text.</div>
+ </div>
+ <fieldset id="box"><div data-testid="chat-input" contenteditable style="padding:4px 40px">Write a short poem</div>
+  <div class="row"><button id="plus" aria-expanded="true">+</button><button id="model" data-testid="model-selector-dropdown" aria-expanded="true">Model X Medium</button></div>
+ </fieldset>
+</div>
+<div data-radix-popper-content-wrapper id="m1"><div role="menu">
+ <div role="menuitem">Upload a file</div><div role="menuitem">Take a screenshot</div><div role="menuitem">Add from project</div><div role="menuitem">Use a style</div></div></div>
+<div data-radix-popper-content-wrapper id="m2"><div role="menu">
+ <div role="menuitem">Model X Large</div><div role="menuitem">Model X Medium</div><div role="menuitem">Model X Small</div><div role="menuitem">More models</div></div></div>
+<script>
+ window.chrome={runtime:{getURL:()=> "data:image/svg+xml,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="9" fill="#c2410c"/></svg>')}};
+ function place(){
+  const p=document.getElementById('plus').getBoundingClientRect(), m=document.getElementById('model').getBoundingClientRect();
+  const a=document.getElementById('m1'), b=document.getElementById('m2');
+  a.style.left=p.left+'px'; a.style.top=(p.top-6-a.offsetHeight)+'px';
+  b.style.left=(m.right-b.offsetWidth)+'px'; b.style.top=(m.top-6-b.offsetHeight)+'px';
+ }
+ window.closeMenus=()=>{document.getElementById('m1').remove();document.getElementById('m2').remove();};
+ place();
+</script>
+</body></html>

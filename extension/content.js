@@ -34,7 +34,9 @@
   const MAX_TURN_MS = 30 * 60 * 1000;   // longer than this is a tab left open
   const HISTORY_CAP = 1000;
   const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false,
-                     serverMode: "shadow", serverSendText: false };
+                     serverMode: "shadow", serverSendText: false, rangeSource: "global" };
+  const GM = { M: self.RDTurnModel, data: self.RDTurnModelData };
+  const SESS = T.sessions();
 
   let settings = Object.assign({}, DEFAULTS);
   let history = [];
@@ -98,7 +100,8 @@
       chrome.runtime.sendMessage({ type: "eta_predict", body: T.serverBody(installId, text) }, (r) => {
         if (chrome.runtime.lastError || !r || pending !== p) return;
         p.srv = r;
-        const pick = T.chooseBand(settings.serverMode, p.localBand, history, r.tok ? r : null, settings.band);
+        const pick = T.chooseBand(settings.serverMode, p.baseBand, history, r.tok ? r : null, settings.band,
+                                  p.baseShown);
         p.band = pick.band;
         p.shown = pick.shown;
       });
@@ -117,6 +120,15 @@
   function modelLabel() {
     const el = $(SEL.model);
     return el ? el.innerText : "";
+  }
+
+  // This conversation's in-memory session, and how many replies it already shows.
+  function sessionKey() { return location.pathname; }
+  function priorReplies() { return document.querySelectorAll(SEL.reply).length; }
+
+  function forecast(pc, cc, model, nowMs) {
+    return T.forecast(history, pc, cc, model, settings.band, T.rangeSource(settings), GM,
+                      SESS.get(sessionKey(), priorReplies()), nowMs / 1000);
   }
 
   function lastReply() {
@@ -149,12 +161,14 @@
     if (pc === 0) return;
     const cc = contextChars(true);
     const model = modelLabel();
-    const local = T.predict(history, pc, cc, model, settings.band);
+    const fc = forecast(pc, cc, model, now);
+    SESS.prompted(sessionKey(), priorReplies());
     pending = {
       start: now, before: lastReply(), el: null, sawStreaming: false, firstAt: null,
       pb: T.promptBucket(pc), cb: T.contextBucket(cc), model: T.modelKey(model),
       incident: !!incident, stopped: false,
-      band: local, localBand: local, shown: "local", srv: null,
+      band: fc.band, localBand: fc.local, glbBand: fc.glb, baseBand: fc.band, baseShown: fc.shown,
+      shown: fc.shown, srv: null,
     };
     lastResult = null;
     askServer(pending, text);
@@ -172,8 +186,9 @@
       rec.words = wordCount(p.el);
       if (p.firstAt) rec.first = Math.round((p.firstAt - p.start) / 10) / 100;
     }
-    if (p.localBand) rec.loc = [Math.round(p.localBand.dur.low * 100) / 100, Math.round(p.localBand.dur.high * 100) / 100];
-    if (p.shown !== "local") rec.shown = p.shown;
+    if (p.localBand) rec.loc = T.pair(p.localBand);
+    if (p.glbBand) rec.glb = T.pair(p.glbBand);
+    if (p.shown !== "local" || p.glbBand) rec.shown = p.shown;
     if (p.srv && p.srv.tok) {
       rec.srv_tok = p.srv.tok; rec.srv_ms = p.srv.ms; rec.srv_ver = p.srv.ver;
       if (T.serverActive(settings) && installId) {
@@ -187,6 +202,7 @@
       rec.srv_err = String(p.srv.err).slice(0, 20);
     }
     save(rec);
+    SESS.finished(sessionKey(), Date.now() / 1000, dur);
     if (ok && settings.showResult) {
       const text = T.doneLine(dur, rec.words, p.band);
       lastResult = { text, until: Date.now() + 15000 };
@@ -235,7 +251,7 @@
     if (lastResult && Date.now() < lastResult.until) return { text: lastResult.text, warn };
     const pc = promptChars();
     if (pc === 0) return { text: "", warn };
-    const b = T.predict(history, pc, contextChars(false), modelLabel(), settings.band);
+    const b = forecast(pc, contextChars(false), modelLabel(), Date.now()).band;
     if (b) return { text: T.bandLine(b), warn };
     return { text: T.learningLine(T.learnedCount(history)), warn };
   }

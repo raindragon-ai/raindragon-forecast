@@ -23,13 +23,16 @@
   const SEL = {
     input: "#prompt-textarea",
     messages: "[data-message-author-role]",
+    replies: '[data-message-author-role="assistant"]',
     stop: '[data-testid="stop-button"]',
   };
   const TICK_MS = 250;
   const MAX_TURN_MS = 30 * 60 * 1000;
   const HISTORY_CAP = 1000;
   const MODEL_KEY = "chatgpt_model";   // last model you sent with, to estimate while typing
-  const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false };
+  const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false, rangeSource: "global" };
+  const GM = { M: self.RDTurnModel, data: self.RDTurnModelData };
+  const SESS = T.sessions();
 
   let settings = Object.assign({}, DEFAULTS);
   let history = [];
@@ -94,6 +97,14 @@
     return ctxCache.chars;
   }
 
+  function sessionKey() { return location.pathname; }
+  function priorReplies() { return document.querySelectorAll(SEL.replies).length; }
+
+  function forecast(pc, cc, model, nowMs) {
+    return T.forecast(history, pc, cc, model, settings.band, T.rangeSource(settings), GM,
+                      SESS.get(sessionKey(), priorReplies()), nowMs / 1000);
+  }
+
   // ---------- turns, from the tap ----------
 
   const num = (x) => typeof x === "number" && isFinite(x) && x >= 0 ? x : 0;
@@ -105,11 +116,14 @@
     const cc = contextChars(true);
     const model = slug(d.model);
     rememberModel(model);
+    const now = Date.now();
+    const fc = forecast(pc, cc, model, now);
+    SESS.prompted(sessionKey(), priorReplies());
     pending = {
-      id: d.id, start: Date.now(), firstAt: null, stopped: false,
+      id: d.id, start: now, firstAt: null, stopped: false,
       pb: T.promptBucket(pc), cb: T.contextBucket(cc), model: T.modelKey(model),
       incident: !!incident,
-      band: T.predict(history, pc, cc, model, settings.band),
+      band: fc.band, localBand: fc.local, glbBand: fc.glb, shown: fc.shown,
     };
     lastResult = null;
   }
@@ -128,7 +142,10 @@
       rec.words = num(d.words);
       if (p.firstAt) rec.first = Math.round((p.firstAt - p.start) / 10) / 100;
     }
+    if (p.localBand) rec.loc = T.pair(p.localBand);
+    if (p.glbBand) { rec.glb = T.pair(p.glbBand); rec.shown = p.shown; }
     save(rec);
+    SESS.finished(sessionKey(), Date.now() / 1000, dur);
     if (ok && settings.showResult) {
       const text = T.doneLine(dur, rec.words, p.band);
       lastResult = { text, until: Date.now() + 15000 };
@@ -163,7 +180,7 @@
     if (lastResult && Date.now() < lastResult.until) return { text: lastResult.text, warn };
     const pc = promptChars();
     if (pc === 0) return { text: "", warn };
-    const b = T.predict(history, pc, contextChars(false), lastModel, settings.band);
+    const b = forecast(pc, contextChars(false), lastModel, Date.now()).band;
     if (b) return { text: T.bandLine(b), warn };
     return { text: T.learningLine(T.learnedCount(history)), warn };
   }

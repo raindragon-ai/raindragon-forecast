@@ -38,7 +38,13 @@ named by the session id like the other markers and deleted after two days.
 Each finished turn also stores the global model's range shown for it
 (`"glb": [20.1, 95.3]`), so Forecast can tell which range has been closer for you.
 
-The global model (`turn_model.json`, shipped with the plugin) was trained
+The extension keeps the same two ranges on each reply (`"loc"` and `"glb"`)
+and which one it showed (`"shown"`). Its "session" (the conversation's reply
+count and last 10 reply times) lives in the page's memory only and is never
+saved.
+
+The global model (`turn_model.json`, shipped with the plugin and, as
+`lib/turn_model_data.js`, with the extension) was trained
 offline on public coding-agent sessions. It contains numbers only, no text from
 anyone's prompts, and runs on your machine; nothing about your turns is sent
 to train or run it.

@@ -1,6 +1,7 @@
 const T = self.RainDragonEta;
+const TM = self.RDTurnModel;
 const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false,
-                   serverMode: "shadow", serverSendText: false };
+                   serverMode: "shadow", serverSendText: false, rangeSource: "global" };
 const SERVER_ORIGIN = { origins: [T.SERVER_URL + "/*"] };
 const $ = (id) => document.getElementById(id);
 const PROVS = Object.values(T.PROVIDERS);   // claude.ai, chatgpt.com, gemini.google.com: separate histories
@@ -35,6 +36,7 @@ function render() {
   $("checkStatus").checked = !!s.checkStatus;
   $("serverSendText").checked = !!s.serverSendText;
   $("serverMode").value = T.SERVER_MODES.includes(s.serverMode) ? s.serverMode : "shadow";
+  $("rangeSource").value = T.rangeSource(s);
   $("count").textContent = "";
   $("eval").textContent = "";
   for (const p of PROVS) {
@@ -43,6 +45,14 @@ function render() {
     div.textContent = p.site + ": " + h.length + " replies saved on this device (" + T.learnedCount(h) +
       " used for forecasts; durations and word counts only); " + evalLine(h, s.band);
     $("count").appendChild(div);
+    const gl = TM.evaluateLive(h);
+    if (gl.turns) {
+      const d3 = document.createElement("div");
+      const f = (b) => b.scored ? pct(b.within_2x) + " within 2x, " + pct(b.coverage) + " inside the range (" + b.scored + ")" : "not yet";
+      d3.textContent = p.site + " with the shared model: " + gl.turns + " replies. Shared: " + f(gl.global) +
+        ". Your own: " + f(gl.local) + ". Shown: " + f(gl.shown) + ".";
+      $("count").appendChild(d3);
+    }
     const sv = T.evaluateServer(h, s.band);
     if (sv.pairedReplies) {
       const d2 = document.createElement("div");
@@ -65,6 +75,7 @@ function diagnostics() {
       phase: good < T.MIN_READY ? "learning (no band yet)" : good < T.CONFIDENT ? "learning (wide band)" : "ready",
       coverage: e.coverage, scored: e.scored, median_ratio: e.medianRatio,
       server: T.evaluateServer(h, state.settings.band),
+      global_model: TM.evaluateLive(h),
     };
   }
   return JSON.stringify({
@@ -88,10 +99,11 @@ function save() {
     enabled: $("enabled").checked, band: $("band").value,
     showResult: $("showResult").checked, checkStatus: $("checkStatus").checked,
     serverMode: $("serverMode").value, serverSendText: $("serverSendText").checked,
+    rangeSource: $("rangeSource").value,
   };
   chrome.storage.local.set({ settings: state.settings }, () => { render(); flash("Saved"); });
 }
-["enabled", "band", "showResult", "checkStatus", "serverMode"].forEach((id) => $(id).addEventListener("change", save));
+["enabled", "band", "showResult", "checkStatus", "serverMode", "rangeSource"].forEach((id) => $(id).addEventListener("change", save));
 
 // Sending prompt text needs the optional host permission; asked here, in the
 // click, because Chrome only allows the request from a user gesture.

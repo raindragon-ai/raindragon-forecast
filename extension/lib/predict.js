@@ -102,6 +102,83 @@
     return null;
   }
 
+  // ---- the global model (lib/turn_model.js + lib/turn_model_data.js) ----
+  //
+  // rangeSource "global" (default), the plugin's rule: the shared model's band
+  // from the first reply; once the local band is past its learning phase, the
+  // local one whenever it was closer on the last 50 replies that recorded both.
+  // "local": the lookup above only. Any error, or no model, means local.
+
+  const RANGE_SOURCES = ["global", "local"];
+  const SESSION_KEEP = 10;
+
+  function rangeSource(settings) {
+    const v = settings && settings.rangeSource;
+    return RANGE_SOURCES.includes(v) ? v : "global";
+  }
+
+  // gm = {M: RDTurnModel, data: RDTurnModelData}; session = {n, k, done} for
+  // this conversation; nowSec in seconds.
+  // -> {band, shown: "global"|"local", local, glb}
+  function forecast(history, promptChars, contextChars, model, coverage, source, gm, session, nowSec) {
+    const local = predict(history, promptChars, contextChars, model, coverage);
+    const none = { band: local, shown: "local", local, glb: null };
+    if (source === "local" || !gm || !gm.M || !gm.data) return none;
+    try {
+      const data = gm.M.load(gm.data);
+      if (!data) return none;
+      const cov = BANDS[coverage] ? coverage : "50";
+      const pc = Math.max(0, promptChars || 0);
+      const hist = (history || []).map((r) => (r && typeof r === "object" ? Object.assign({}, r, { effort: r.model }) : r));
+      const f = gm.M.features(pc, 0, modelKey(model), hist, session, nowSec,
+                              { pb: promptBucket(pc), cb: contextBucket(contextChars || 0) });
+      const b = gm.M.band(data, f, cov);
+      if (!b || !(b.low > 0) || !(b.high >= b.low) || !isFinite(b.high)) return none;
+      const n = learnedCount(history);
+      // Until the lookup has MIN_READY replies the model knows nothing about you:
+      // say so, as the lookup's own wide band does.
+      const glb = { dur: b, words: local ? local.words : null, n, group: "global", coverage: cov,
+                    learning: n < MIN_READY };
+      const [band, shown] = gm.M.choose(glb, local, history);
+      return { band, shown, local, glb };
+    } catch (e) {
+      return none;
+    }
+  }
+
+  // In-memory sessions (one per conversation), the extension's stand-in for the
+  // plugin's store.read_session: never saved, gone on reload. prior: replies
+  // already on screen, so an old conversation does not count as a new one.
+  function sessions(cap) {
+    const m = new Map();
+    const max = cap || 50;
+    function entry(key) {
+      let s = m.get(key);
+      if (!s) {
+        s = { n: 0, k: 0, done: [] };
+        m.set(key, s);
+        if (m.size > max) m.delete(m.keys().next().value);
+      }
+      return s;
+    }
+    return {
+      get(key, prior) {
+        const s = m.get(key) || { n: 0, k: 0, done: [] };
+        return { n: Math.max(s.n, prior || 0), k: s.k, done: s.done.slice() };
+      },
+      prompted(key, prior) { const s = entry(key); s.n = Math.max(s.n, prior || 0) + 1; },
+      finished(key, endSec, dur) {
+        const s = entry(key);
+        s.k += 1;
+        s.done = s.done.concat([[Math.round(endSec * 10) / 10, Math.round(dur * 100) / 100]]).slice(-SESSION_KEEP);
+      },
+    };
+  }
+
+  function pair(b) {
+    return b ? [Math.round(b.dur.low * 100) / 100, Math.round(b.dur.high * 100) / 100] : null;
+  }
+
   // Replay in order; each reply is scored only against the band built from the
   // replies before it. Coverage and width are reported together.
   function evaluate(history, coverage) {
@@ -365,12 +442,15 @@
 
   // What to SHOW for a reply: {band, shown}. Shadow, off, an error, or too few
   // paired replies all mean the local band, unchanged.
-  function chooseBand(mode, local, history, answer, coverage) {
-    if (!answer || (mode !== "server" && mode !== "blend")) return { band: local, shown: "local" };
+  // local: the band shown without the server (the lookup's or the global
+  // model's; baseShown names it, "local" by default).
+  function chooseBand(mode, local, history, answer, coverage, baseShown) {
+    const base = { band: local, shown: baseShown || "local" };
+    if (!answer || (mode !== "server" && mode !== "blend")) return base;
     const srv = serverBand(history, answer.tok, coverage);
-    if (!srv) return { band: local, shown: "local" };
+    if (!srv) return base;
     if (mode === "server") return { band: srv, shown: "server" };
-    return local ? { band: blendBands(local, srv), shown: "blend" } : { band: local, shown: "local" };
+    return local ? { band: blendBands(local, srv), shown: "blend" } : base;
   }
 
   // Live comparison on replies with a server answer: the local band recorded
@@ -400,6 +480,7 @@
   const api = {
     SERVER_URL, SERVER_MODES, MIN_PAIRED, serverActive, serverBody, serverAnswer, serverBand,
     blendBands, chooseBand, evaluateServer,
+    RANGE_SOURCES, rangeSource, forecast, sessions, pair,
     VERSION, MIN_READY, CONFIDENT, MIN_GROUP, RECENT, BANDS,
     promptBucket, contextBucket, modelKey, quantile, usable, predict, evaluate, learnedCount,
     duration, words, wordsText, bandLine, clock, liveLine, doneLine, learningLine, incidentLine, incidentFromSummary, incidentFromGoogle, WEB_COMPONENTS, PROVIDERS,

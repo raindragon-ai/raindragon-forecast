@@ -1,12 +1,14 @@
 /* The global turn model (plugin/scripts/raindragon_eta/turn_model.py) in plain JS:
- * the same feature vector and the same LightGBM tree walk over turn_model.json.
- *
- * Not used by the extension yet: it was trained on coding-agent turns, and the
- * extension times chat replies, which it was never measured on. It is here so a
- * JS host can use the one file, and tests/turn_model.test.js pins it to the
+ * the same feature vector, the same LightGBM tree walk over turn_model.json and
+ * the same global/local pick (choose). tests/turn_model.test.js pins it to the
  * Python numbers.
  *
- * Plain script: loaded by node for tests.
+ * The extension uses it through RainDragonEta.forecast (predict.js), with the
+ * model bundled as lib/turn_model_data.js. It was trained on coding-agent turns;
+ * the extension times chat replies, which it was never measured on, so the pick
+ * rule (local once it has been closer for you) matters more there.
+ *
+ * Plain script: loaded by the content scripts, and by node for tests.
  */
 (function (root) {
   "use strict";
@@ -62,8 +64,9 @@
     return null;
   }
 
-  // session = {n, k, done: [[end, dur], ...]}; history = finished turns, oldest first
-  function features(promptChars, transcriptBytes, effort, history, session, now) {
+  // session = {n, k, done: [[end, dur], ...]}; history = finished turns, oldest first.
+  // buckets: {pb, cb} for hosts that bucket sizes their own way (the extension).
+  function features(promptChars, transcriptBytes, effort, history, session, now, buckets) {
     const f = { lp: Math.log1p(Math.max(0, promptChars || 0)) };
     const s = session || {};
     const kept = (s.done || []).filter((d) => Array.isArray(d) && d.length === 2 && d[1] > 0);
@@ -88,8 +91,9 @@
       f.u_q10 = quantile(s2, 0.10); f.u_q90 = quantile(s2, 0.90);
       f.u_med5 = median(lh.slice(-5));
     }
-    const b = localBand(good, promptBucket(promptChars || 0), contextBucket(transcriptBytes || 0),
-                        effort == null ? null : effort);
+    const pb = buckets ? buckets.pb : promptBucket(promptChars || 0);
+    const cb = buckets ? buckets.cb : contextBucket(transcriptBytes || 0);
+    const b = localBand(good, pb, cb, effort == null ? null : effort);
     if (b && b[0] > 0 && b[1] > 0) { f.loc_lo = Math.log(b[0]); f.loc_hi = Math.log(b[1]); }
     return f;
   }
@@ -131,7 +135,67 @@
                              : { low: Math.exp(q[1]), high: Math.exp(q[3]) };
   }
 
-  const api = { QUANTILES, features, quantiles, band, treeSum };
+  const FEATURES = ["lp", "lprior", "s_n", "s_prev1", "s_prev2", "s_med", "s_gap",
+                    "u_n", "u_med", "u_q25", "u_q75", "u_q10", "u_q90", "u_med5", "loc_lo", "loc_hi"];
+
+  // turn_model.load: the model if it has the expected shape, else null
+  function load(raw) {
+    try {
+      if (!raw || raw.quantiles.length !== QUANTILES.length ||
+          raw.quantiles.some((q, i) => Number(q) !== QUANTILES[i])) return null;
+      if (raw.features.some((n) => FEATURES.indexOf(n) < 0)) return null;
+      if (!Array.isArray(raw.trees) || raw.trees.length !== QUANTILES.length) return null;
+      if (!(typeof raw.widen["50"] === "number" && typeof raw.widen["80"] === "number")) return null;
+      return raw;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ---- which band to show (turn_model.choose) ----
+
+  const PICK_WINDOW = 50;
+  const PICK_MIN = 20;
+
+  function hit(b, dur) {
+    return Array.isArray(b) && b.length === 2 && b.every((v) => typeof v === "number" && v > 0) &&
+      Math.abs(Math.log(Math.sqrt(b[0] * b[1]) / dur)) <= Math.log(2);
+  }
+
+  function localIsBetter(history) {
+    const both = usable(history).filter((r) => r.glb && r.loc).slice(-PICK_WINDOW);
+    if (both.length < PICK_MIN) return false;
+    let loc = 0, glb = 0;
+    for (const r of both) { if (hit(r.loc, r.dur)) loc++; if (hit(r.glb, r.dur)) glb++; }
+    return loc > glb;
+  }
+
+  // [band, "global" | "local"]; local: an object with a `learning` flag, or null
+  function choose(glb, local, history) {
+    if (glb == null) return [local, "local"];
+    if (local != null && !local.learning && localIsBetter(history)) return [local, "local"];
+    return [glb, "global"];
+  }
+
+  // turn_model.evaluate_live, on replies that recorded the global band
+  function evaluateLive(history) {
+    const rows = usable(history).filter((r) => r.glb);
+    const shown = (r) => (r.shown === "local" && r.loc ? r.loc : r.glb);
+    const out = { turns: rows.length };
+    for (const [name, pick] of [["global", (r) => r.glb], ["local", (r) => r.loc], ["shown", shown]]) {
+      const got = rows.filter((r) => pick(r)).map((r) => [pick(r), r.dur]);
+      const n = got.length;
+      out[name] = {
+        scored: n,
+        coverage: n ? got.filter(([b, d]) => b[0] <= d && d <= b[1]).length / n : null,
+        within_2x: n ? got.filter(([b, d]) => hit(b, d)).length / n : null,
+      };
+    }
+    return out;
+  }
+
+  const api = { QUANTILES, FEATURES, PICK_WINDOW, PICK_MIN, features, quantiles, band, treeSum, load,
+                localIsBetter, choose, evaluateLive };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.RDTurnModel = api;
 })(typeof self !== "undefined" ? self : this);

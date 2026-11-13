@@ -18,7 +18,9 @@
   const PILL = self.RainDragonEtaPill;
   const TICK_MS = 250;
   const HISTORY_CAP = 1000;
-  const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false };
+  const DEFAULTS = { enabled: true, band: "50", checkStatus: true, showResult: false, rangeSource: "global" };
+  const GM = { M: self.RDTurnModel, data: self.RDTurnModelData };
+  const SESS = T.sessions();
 
   let settings = Object.assign({}, DEFAULTS);
   let history = [];
@@ -62,6 +64,14 @@
     return ctxCache.chars;
   }
 
+  function sessionKey() { return location.pathname; }
+  function priorReplies() { return document.querySelectorAll(G.SEL.reply).length; }
+
+  function forecast(pc, cc, model, nowMs) {
+    return T.forecast(history, pc, cc, model, settings.band, T.rangeSource(settings), GM,
+                      SESS.get(sessionKey(), priorReplies()), nowMs / 1000);
+  }
+
   // ---------- turns ----------
 
   function onSend() {
@@ -72,11 +82,13 @@
     if (pc === 0) return;
     const cc = contextChars(true);
     const model = G.modelLabel(document);
+    const fc = forecast(pc, cc, model, now);
+    SESS.prompted(sessionKey(), priorReplies());
     pending = {
       turn: G.createTurn(document, now),
       pb: T.promptBucket(pc), cb: T.contextBucket(cc), model: T.modelKey(model),
       incident: !!incident,
-      band: T.predict(history, pc, cc, model, settings.band),
+      band: fc.band, localBand: fc.local, glbBand: fc.glb, shown: fc.shown,
     };
     lastResult = null;
   }
@@ -89,7 +101,10 @@
     pending = null;
     const rec = G.toRecord(r, p, Math.floor(Date.now() / 1000));
     if (!rec) return;                  // stopped or unknown: never saved
+    if (p.localBand) rec.loc = T.pair(p.localBand);
+    if (p.glbBand) { rec.glb = T.pair(p.glbBand); rec.shown = p.shown; }
     save(rec);
+    SESS.finished(sessionKey(), Date.now() / 1000, rec.dur);
     if (rec.ok && settings.showResult) {
       const text = T.doneLine(rec.dur, rec.words, p.band);
       lastResult = { text, until: Date.now() + 15000 };
@@ -121,7 +136,7 @@
     if (lastResult && Date.now() < lastResult.until) return { text: lastResult.text, warn };
     const pc = G.promptChars(document);
     if (pc === 0) return { text: "", warn };
-    const b = T.predict(history, pc, contextChars(false), G.modelLabel(document), settings.band);
+    const b = forecast(pc, contextChars(false), G.modelLabel(document), Date.now()).band;
     if (b) return { text: T.bandLine(b), warn };
     return { text: T.learningLine(T.learnedCount(history)), warn };
   }

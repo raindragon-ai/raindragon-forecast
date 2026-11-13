@@ -30,6 +30,8 @@
       ],
       "js": [
         "lib/predict.js",
+        "lib/turn_model.js",
+        "lib/turn_model_data.js",
         "lib/pill.js",
         "content.js"
       ],
@@ -52,6 +54,8 @@
       ],
       "js": [
         "lib/predict.js",
+        "lib/turn_model.js",
+        "lib/turn_model_data.js",
         "lib/pill.js",
         "chatgpt.js"
       ],
@@ -63,6 +67,8 @@
       ],
       "js": [
         "lib/predict.js",
+        "lib/turn_model.js",
+        "lib/turn_model_data.js",
         "lib/pill.js",
         "lib/gemini_dom.js",
         "gemini.js"

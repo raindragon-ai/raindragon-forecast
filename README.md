@@ -102,8 +102,13 @@ the last 50. Set **Range source** to `local` for the old rule:
 | 10–29 | a wider range (8 in 10 of your similar turns), marked "still learning" |
 | 30 and up | the normal range (half of your similar turns), and one "Forecast has your pace" message |
 
-The extension (claude.ai, chatgpt.com, gemini.google.com) still uses the
-per-user rule: the shared model was trained on agent turns, not chat replies.
+The extension (claude.ai, chatgpt.com, gemini.google.com) uses the same model
+and the same rule, with the model bundled inside it and run in the browser.
+"This session" is the conversation you are in, kept in memory only. The model
+was trained on agent turns, not chat replies, and has not been measured on
+them: until you have 10 replies its range is marked "still learning", and the
+switch to your own history after 30 is what keeps it honest. The extension's
+options have the same **Range source** setting.
 
 Turns that fail, turns you stop, and turns during a major Claude incident are
 left out, so they never stretch your range.

@@ -46,3 +46,46 @@ test("a band from the first turn, the 80% one around the 50% one", () => {
 test("no model, no band", () => {
   assert.equal(T.band(null, {}, "50"), null);
 });
+
+test("the extension ships the plugin's model, unchanged", () => {
+  const bundled = require("../extension/lib/turn_model_data.js").RDTurnModelData;
+  assert.deepEqual(bundled, model);
+  assert.equal(T.load(bundled), bundled);
+});
+
+test("load refuses a model of the wrong shape", () => {
+  assert.equal(T.load(null), null);
+  assert.equal(T.load({}), null);
+  assert.equal(T.load(Object.assign({}, model, { features: model.features.concat(["prompt_text"]) })), null);
+  assert.equal(T.load(Object.assign({}, model, { quantiles: [0.5] })), null);
+});
+
+test("buckets passed in (the extension's sizes): same features and quantiles as Python", () => {
+  assert.ok(fx.bucket_cases.length >= 30);
+  for (const c of fx.bucket_cases) {
+    const f = T.features(c.prompt_chars, 0, c.effort, c.history, c.session, c.now, { pb: c.pb, cb: c.cb });
+    for (const [k, want] of Object.entries(c.features)) {
+      if (want === null) assert.ok(Number.isNaN(f[k]), `${k} should be missing`);
+      else close(f[k], want, 1e-9);
+    }
+    T.quantiles(model, f).forEach((v, i) => close(v, c.quantiles[i], 1e-9));
+  }
+});
+
+test("same global/local pick and live scores as Python", () => {
+  for (const c of fx.choose_cases) {
+    assert.equal(T.localIsBetter(c.history), c.local_is_better);
+    const glb = c.global ? { tag: "global" } : null;
+    const local = c.local ? { tag: "local", learning: c.local.learning } : null;
+    assert.equal(T.choose(glb, local, c.history)[1], c.shown);
+    const got = T.evaluateLive(c.history), want = c.evaluate_live;
+    assert.equal(got.turns, want.turns);
+    for (const k of ["global", "local", "shown"]) {
+      assert.equal(got[k].scored, want[k].scored);
+      for (const m of ["coverage", "within_2x"]) {
+        if (want[k][m] === null) assert.equal(got[k][m], null);
+        else close(got[k][m], want[k][m], 1e-12);
+      }
+    }
+  }
+});

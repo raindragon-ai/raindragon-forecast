@@ -31,7 +31,7 @@ DATA_SUBDIR = {"codex": (".codex", "raindragon-forecast"), "gemini": (".gemini",
 #: e.g. {"band": "80", "show_result": true, "check_status": false}. Hooks in
 #: Gemini CLI run in a sanitized environment, so a file is the reliable place.
 SETTING_KEYS = {"enabled": "ENABLED", "band": "BAND", "show_result": "SHOW_RESULT",
-                "check_status": "CHECK_STATUS", "mark": "MARK"}
+                "check_status": "CHECK_STATUS", "mark": "MARK", "model": "MODEL"}
 
 ROLLOUT_TAIL_BYTES = 1_000_000  # read at most the last 1 MB of a Codex rollout
 

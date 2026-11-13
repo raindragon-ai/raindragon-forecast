@@ -5,6 +5,8 @@ history.jsonl  one line per finished turn: duration and coarse size buckets.
 pending/<sid>  the turn currently running in a session (start time + the
                estimate we showed), removed when the turn ends.
 noted/<sid>    marker that we already told this session we are still learning.
+sessions/<sid> this session's prompt count and its last few turn durations
+               (numbers only), the global model's session features.
 
 The tool was called RainDragon ETA before 0.2.x became RainDragon Forecast.
 Renaming the plugin gives it a new data dir, so the first run copies the old
@@ -35,6 +37,7 @@ def data_dir(env: dict) -> str:
     d = env.get("CLAUDE_PLUGIN_DATA") or os.path.join(_home(env), HOME_DIR)
     os.makedirs(os.path.join(d, "pending"), exist_ok=True)
     os.makedirs(os.path.join(d, "noted"), exist_ok=True)
+    os.makedirs(os.path.join(d, "sessions"), exist_ok=True)
     migrate_old_history(env, d)
     return d
 
@@ -133,7 +136,7 @@ def pop_pending(d: str, session_id: str) -> Optional[dict]:
 
 def cleanup(d: str, now: float, max_age: float = 2 * 86400) -> None:
     """Drop per-session markers older than max_age so they don't pile up."""
-    for sub in ("pending", "noted"):
+    for sub in ("pending", "noted", "sessions"):
         folder = os.path.join(d, sub)
         try:
             names = os.listdir(folder)
@@ -146,6 +149,44 @@ def cleanup(d: str, now: float, max_age: float = 2 * 86400) -> None:
                     os.remove(path)
             except OSError:
                 pass
+
+
+SESSION_KEEP = 10
+
+
+def read_session(d: str, session_id: str) -> dict:
+    """{"n": prompts so far, "k": turns finished, "done": last SESSION_KEEP [end, dur]}."""
+    try:
+        with open(os.path.join(d, "sessions", _safe(session_id))) as f:
+            s = json.load(f)
+        if isinstance(s, dict):
+            return s
+    except (OSError, ValueError):
+        pass
+    return {"n": 0, "k": 0, "done": []}
+
+
+def _write_session(d: str, session_id: str, s: dict) -> None:
+    path = os.path.join(d, "sessions", _safe(session_id))
+    try:
+        with open(path + ".tmp", "w") as f:
+            json.dump(s, f, separators=(",", ":"))
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
+def session_prompted(d: str, session_id: str) -> None:
+    s = read_session(d, session_id)
+    s["n"] = int(s.get("n") or 0) + 1
+    _write_session(d, session_id, s)
+
+
+def session_finished(d: str, session_id: str, end: float, dur: float) -> None:
+    s = read_session(d, session_id)
+    s["k"] = int(s.get("k") or 0) + 1
+    s["done"] = (list(s.get("done") or []) + [[round(end, 1), round(dur, 2)]])[-SESSION_KEEP:]
+    _write_session(d, session_id, s)
 
 
 def mark_noted(d: str, session_id: str) -> bool:

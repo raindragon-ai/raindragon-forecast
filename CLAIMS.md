@@ -39,9 +39,21 @@ range from your own history.
    (80% for the wide range), reported per user in the beta (RAI-332).
 
 2. **It tells you when it does not know yet.**
-   No range before 10 turns; the wide range, marked "still learning", until
-   30. *Measured:* behaviour is fixed by the rule and covered by tests; first
-   run is shown in the docs.
+   With Range source `local` (and in the extension): no range before 10
+   turns; the wide range, marked "still learning", until 30. *Measured:*
+   behaviour is fixed by the rule and covered by tests; first run is shown in
+   the docs.
+
+2a. **In Claude Code and the CLI hooks it has a range from the first turn.**
+   The default Range source `global` uses one model shared by everyone,
+   trained on public coding-agent sessions (337 people, 72K turns).
+   *Measured:* 5-fold leave-people-out on that data (tools/train_turn_model.py
+   --louo): the range's middle within 2x of the real time 39.8% vs 35.8% for
+   the per-user lookup where it shows anything; 50.4% / 80.2% of turns inside
+   the 50% / 80% range; 36.3% within 2x on a person's first 10 turns. Do not
+   claim a coverage number for any one user from this: on the one long real
+   plugin history we have, the global range alone covered 42.7% at nominal
+   50%, and the shown range (global, or local once it has been closer) 46.2%.
 
 3. **It tells you when Claude is having a major problem.**
    It reads status.claude.com and warns only during a MAJOR incident (impact

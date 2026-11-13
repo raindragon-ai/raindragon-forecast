@@ -28,6 +28,17 @@ def test_model_file_loads_and_wants_only_known_features():
     assert len(m["trees"]) == len(turn_model.QUANTILES)
 
 
+def test_extension_bundles_the_same_model():
+    """extension/lib/turn_model_data.js is tools/bundle_turn_model.py's copy of turn_model.json."""
+    path = os.path.join(os.path.dirname(__file__), "..", "extension", "lib", "turn_model_data.js")
+    with open(path) as f:
+        text = f.read()
+    start = text.index("root.RDTurnModelData = ") + len("root.RDTurnModelData = ")
+    bundled = json.loads(text[start:text.rindex("; })")])
+    with open(turn_model.MODEL_PATH) as f:
+        assert bundled == json.load(f)
+
+
 def test_model_file_holds_numbers_not_text():
     """No prompt text, ids or other strings: only its own keys and feature names."""
     with open(turn_model.MODEL_PATH) as f:

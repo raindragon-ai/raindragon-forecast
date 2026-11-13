@@ -32,6 +32,13 @@
   </select>
 </label>
 <div class="hint">Until 30 replies the wider range is used and marked "still learning".</div>
+<label>Range source
+  <select id="rangeSource">
+    <option value="global">Shared model from your first reply, then your own history when it is closer</option>
+    <option value="local">Only my own past replies (nothing until 10 replies)</option>
+  </select>
+</label>
+<div class="hint">The shared model ships inside the extension and runs in this browser. It reads only numbers: the prompt's length, this conversation's reply times and your recent reply times. It was trained on coding-agent turns, not chat replies, so until 10 replies its range is marked "still learning"; after 30, your own history is used whenever it has been closer for you.</div>
 <label><input type="checkbox" id="showResult"> Show how long each reply really took</label>
 <label><input type="checkbox" id="checkStatus"> Check Claude, ChatGPT and Gemini status</label>
 <div class="hint">Reads status.claude.com (on claude.ai) and status.openai.com (on chatgpt.com) and Google's status dashboard, www.google.com/appsstatus (on gemini.google.com), every 2 minutes, and shows a storm warning during a major incident.</div>
@@ -54,6 +61,7 @@
 <div class="hint" style="margin-left:0">Clear removes the claude.ai, chatgpt.com and gemini.google.com histories. Diagnostics hold the version, settings and counts only: no prompts, replies or chat names.</div>
 <p class="maker">RainDragon Forecast is an independent project by RainDragon AI. It is not made, endorsed or supported by Anthropic, OpenAI or Google.<br>Made by <a href="https://inference.raindragon.ai/?utm_source=raindragon-forecast&utm_medium=extension" target="_blank" rel="noopener">RainDragon AI</a></p>
 <script src="lib/predict.js"></script>
+<script src="lib/turn_model.js"></script>
 <script src="options.js"></script>
 </body>
 </html>

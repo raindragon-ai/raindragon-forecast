@@ -222,3 +222,76 @@ test("evaluateServer compares local, server and blend on paired replies", () => 
   assert.equal(e.local.scored, 30);
   assert.equal(e.server.scored, 30 - T.MIN_PAIRED);
 });
+
+// ---- the global model in the extension (RainDragonEta.forecast) ----
+
+const TM = require("../extension/lib/turn_model.js");
+const GM = { M: TM, data: require("../extension/lib/turn_model_data.js").RDTurnModelData };
+
+test("global: a range from the first reply, marked still learning", () => {
+  const fc = T.forecast([], 120, 0, "Opus 5.5 Medium", "50", "global", GM, null, 1.7e9);
+  assert.equal(fc.local, null);
+  assert.equal(fc.shown, "global");
+  assert.ok(fc.band.dur.low > 0 && fc.band.dur.low < fc.band.dur.high);
+  assert.equal(fc.band.learning, true);
+  assert.match(T.bandLine(fc.band), /^Forecast .* · still learning$/);
+});
+
+test("global: the same numbers as the model on the same features", () => {
+  const h = Array.from({ length: 40 }, (_, i) => rec(5 + (i % 9) * 3));
+  const s = { n: 2, k: 2, done: [[1.7e9 - 90, 12], [1.7e9 - 30, 20]] };
+  const fc = T.forecast(h, 150, 1000, "Opus 5.5 Medium", "50", "global", GM, s, 1.7e9);
+  const hist = h.map((r) => Object.assign({}, r, { effort: r.model }));
+  const f = TM.features(150, 0, "opus 5.5 medium", hist, s, 1.7e9, { pb: "short", cb: "small" });
+  const want = TM.band(GM.data, f, "50");
+  assert.equal(fc.shown, "global");
+  assert.deepEqual(fc.band.dur, want);
+  assert.equal(fc.band.learning, false);
+  assert.deepEqual(fc.band.words, fc.local.words);
+});
+
+test("rangeSource local, no model, a broken model or a throwing model: the local lookup", () => {
+  const h = Array.from({ length: 31 }, (_, i) => rec(10 + i));
+  const local = T.predict(h, 50, 100, "Opus 5.5 Medium", "50");
+  const boom = { M: Object.assign({}, TM, { features() { throw new Error("x"); } }), data: GM.data };
+  for (const [src, gm] of [["local", GM], ["global", null], ["global", { M: TM, data: { trees: [] } }],
+                           ["global", boom]]) {
+    const fc = T.forecast(h, 50, 100, "Opus 5.5 Medium", "50", src, gm, null, 1.7e9);
+    assert.equal(fc.shown, "local");
+    assert.equal(fc.glb, null);
+    assert.deepEqual(fc.band, local);
+  }
+  assert.equal(T.rangeSource({}), "global");
+  assert.equal(T.rangeSource({ rangeSource: "local" }), "local");
+  assert.equal(T.rangeSource({ rangeSource: "bogus" }), "global");
+});
+
+test("global switches to local once local has been closer on recent replies", () => {
+  const h = Array.from({ length: 40 }, (_, i) => rec(10 + (i % 5), { loc: [9, 14], glb: [60, 200] }));
+  const fc = T.forecast(h, 50, 100, "Opus 5.5 Medium", "50", "global", GM, null, 1.7e9);
+  assert.equal(fc.shown, "local");
+  assert.deepEqual(fc.band, fc.local);
+  assert.ok(fc.glb);
+  // still learning locally (under CONFIDENT): global stays
+  const fc2 = T.forecast(h.slice(0, 25), 50, 100, "Opus 5.5 Medium", "50", "global", GM, null, 1.7e9);
+  assert.equal(fc2.shown, "global");
+});
+
+test("in-memory sessions: prompts, finished replies, the last 10 kept", () => {
+  const S = T.sessions();
+  assert.deepEqual(S.get("/chat/a", 0), { n: 0, k: 0, done: [] });
+  assert.equal(S.get("/chat/old", 7).n, 7);
+  S.prompted("/new", 0);
+  for (let i = 0; i < 12; i++) S.finished("/chat/a", 1000 + i, 5 + i);
+  const s = S.get("/chat/a", 1);
+  assert.equal(s.k, 12);
+  assert.equal(s.done.length, 10);
+  assert.deepEqual(s.done[9], [1011, 16]);
+  assert.equal(s.n, 1);
+});
+
+test("chooseBand keeps the base band's name when the server is not used", () => {
+  const b = { dur: { low: 1, high: 2 } };
+  assert.deepEqual(T.chooseBand("shadow", b, [], null, "50", "global"), { band: b, shown: "global" });
+  assert.deepEqual(T.chooseBand("shadow", b, [], null, "50"), { band: b, shown: "local" });
+});

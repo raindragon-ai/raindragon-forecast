@@ -142,7 +142,8 @@ function contentScript(pg, stored = {}) {
   let now = 1_000_000;
   const shown = [];
   const ctx = {
-    console, Object, Array, Math, JSON, String, Number,
+    console, Object, Array, Math, JSON, String, Number, Map,
+    location: { pathname: "/app/synthetic" },
     Date: class extends Date { static now() { return now; } },
     setInterval: (fn, ms) => { if (ms < 1000) ticks.push(fn); },
     document: Object.assign(pg.d, { addEventListener: (k, fn) => { listeners[k] = fn; } }),
@@ -163,6 +164,8 @@ function contentScript(pg, stored = {}) {
   vm.createContext(ctx);
   const src = (f) => fs.readFileSync(path.join(__dirname, "..", "extension", f), "utf8");
   vm.runInContext(src("lib/predict.js"), ctx);
+  vm.runInContext(src("lib/turn_model.js"), ctx);
+  vm.runInContext(src("lib/turn_model_data.js"), ctx);
   vm.runInContext(src("lib/gemini_dom.js"), ctx);
   vm.runInContext(src("gemini.js"), ctx);
   return {
@@ -197,8 +200,11 @@ test("Gemini replies go to their own history; claude.ai and chatgpt.com are unto
   assert.ok(Math.abs(rec.dur - 3.5) < 0.3, String(rec.dur));
   assert.deepEqual(cs.store.history, claude);
   assert.deepEqual(cs.store.history_chatgpt, []);
-  // record holds numbers and buckets only
-  assert.deepEqual(Object.keys(rec).sort(), ["cb", "dur", "first", "incident", "model", "ok", "pb", "t", "words"]);
+  // record holds numbers and buckets only; the first reply had the global range only
+  assert.deepEqual(Object.keys(rec).sort(),
+                   ["cb", "dur", "first", "glb", "incident", "model", "ok", "pb", "shown", "t", "words"]);
+  assert.equal(rec.shown, "global");
+  assert.ok(rec.glb[0] > 0 && rec.glb[0] < rec.glb[1]);
 });
 
 test("a stopped Gemini reply is not saved", () => {
@@ -212,11 +218,19 @@ test("first run on Gemini starts from zero even with a long Claude history", () 
   const claude = Array.from({ length: 40 }, (_, i) =>
     ({ dur: 10 + i, ok: true, incident: false, pb: "short", cb: "small", model: null, words: 50 }));
   const pg = page({ model: null });
-  const cs = contentScript(pg, { history: claude });
+  const cs = contentScript(pg, { history: claude, settings: { rangeSource: "local" } });
   pg.type("hello");
   cs.advance(250);
   assert.match(cs.shown[cs.shown.length - 1].text, /^Forecast is learning your pace\. .* \(0 so far\)\.$/);
   assert.equal(cs.shown[cs.shown.length - 1].box, pg.composer);
+});
+
+test("first run on Gemini with the global model: a range marked still learning", () => {
+  const pg = page({ model: null });
+  const cs = contentScript(pg, {});
+  pg.type("hello");
+  cs.advance(250);
+  assert.match(cs.shown[cs.shown.length - 1].text, /^Forecast \S+ · still learning$/);
 });
 
 test("PROVIDERS: Gemini has its own key and the Google status host is permitted", () => {
@@ -225,7 +239,8 @@ test("PROVIDERS: Gemini has its own key and the Google status host is permitted"
   const m = require("../extension/manifest.json");
   assert.ok(m.host_permissions.includes("https://www.google.com/appsstatus/*"));
   const cs = m.content_scripts.find((c) => c.matches.includes("https://gemini.google.com/*"));
-  assert.deepEqual(cs.js, ["lib/predict.js", "lib/pill.js", "lib/gemini_dom.js", "gemini.js"]);
+  assert.deepEqual(cs.js, ["lib/predict.js", "lib/turn_model.js", "lib/turn_model_data.js", "lib/pill.js",
+                           "lib/gemini_dom.js", "gemini.js"]);
 });
 
 // ---- Google status dashboard (synthetic incidents; real field names) ----

@@ -20,7 +20,7 @@
 (function (root) {
   "use strict";
 
-  const VERSION = "0.2.0";
+  const VERSION = "0.2.1";
   const MIN_READY = 10;
   const CONFIDENT = 30;
   const MIN_GROUP = 8;

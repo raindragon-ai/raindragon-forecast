@@ -143,7 +143,7 @@ carries:
 | :- | :- |
 | The prompt you typed, first 8,000 characters | `fix the flaky test in parser_test.py` |
 | A random id made on your machine for this install | `3f0c2a9e-7b1d-...` |
-| Which client and version | `plugin`, `0.2.0` |
+| Which client and version | `plugin`, `0.2.1` |
 | The model name, always the word `claude` | `claude` |
 | `share: false`: the server must not keep the text | `false` |
 

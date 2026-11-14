@@ -258,9 +258,9 @@ name, because they never appear on screen.
 
 | Part | Folder | Version |
 | :- | :- | :- |
-| Claude Code plugin | `plugin/` | 0.2.0 |
-| Chrome extension | `extension/` | 0.2.0 |
-| Codex CLI and Gemini CLI hooks | `plugin/scripts/` | 0.2.0 |
+| Claude Code plugin | `plugin/` | 0.2.1 |
+| Chrome extension | `extension/` | 0.2.1 |
+| Codex CLI and Gemini CLI hooks | `plugin/scripts/` | 0.2.1 |
 
 ## Develop
 

@@ -1,7 +1,7 @@
 {
   "name": "forecast",
   "displayName": "RainDragon Forecast",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Shows how long your Claude Code turns usually take, as a range from your own past turns, with a live clock while Claude works. Warns when Claude has a major incident.",
   "author": {
     "name": "RainDragon AI"

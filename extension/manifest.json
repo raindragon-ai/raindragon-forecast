@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RainDragon Forecast",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Shows how long replies on claude.ai, chatgpt.com and gemini.google.com usually take you, as a range from your own past replies.",
   "icons": {
     "16": "icons/16.png",

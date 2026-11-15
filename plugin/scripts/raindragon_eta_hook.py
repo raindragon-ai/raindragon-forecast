@@ -240,7 +240,7 @@ def on_prompt(inp: dict, env: dict, now: float, fetch=None, host: str = "claude"
             # RainDragon ETA user whose copied history is already past it).
             # Kept outside noted/, which is cleaned after 2 days.
             store.write_json(d, "learned.json", {"said": True, "at": int(now)})
-            lines.append("Forecast has your pace (%d turns)." % predict.CONFIDENT
+            lines.append("Forecast has your pace (%d turns)." % predict.learned_count(history)
                          + (" Ranges now show the middle half." if band.coverage == "50" else ""))
     elif store.mark_noted(d, sid):
         lines.append("%s is learning your pace. Ranges start after %d turns."
@@ -336,6 +336,7 @@ def doctor(env: dict, now: float, host: str = "claude") -> dict:
         "turns_in_progress": pending,
         "model": {"setting": model_setting(env), "file": bool(turn_model.load()),
                   "version": (turn_model.load() or {}).get("version"),
+                  "trained_on": (turn_model.load() or {}).get("trained_on"),
                   "turns_with_global": sum(1 for r in h if r.get("glb"))},
         "status_cache_age_s": cache_age,
         "python": sys.version.split()[0],

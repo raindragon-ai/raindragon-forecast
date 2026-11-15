@@ -39,10 +39,13 @@ range from your own history.
    (80% for the wide range), reported per user in the beta (RAI-332).
 
 2. **It tells you when it does not know yet.**
-   With Range source `local`: no range before 10
+   With Range source `global` (default): the shared model's range from the
+   first turn, but always the wide one (8 in 10) and marked "still learning"
+   until 10 turns of your own. With Range source `local`: no range before 10
    turns; the wide range, marked "still learning", until 30. *Measured:*
    behaviour is fixed by the rule and covered by tests; first run is shown in
-   the docs.
+   [docs/FIRST_RUN.md](docs/FIRST_RUN.md) with screenshots, and the accepted
+   launch risk is stated there.
 
 2a. **In Claude Code, the CLI hooks and the extension it has a range from the first turn.**
    The default Range source `global` uses one model shared by everyone,

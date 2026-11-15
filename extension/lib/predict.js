@@ -132,13 +132,16 @@
       const hist = (history || []).map((r) => (r && typeof r === "object" ? Object.assign({}, r, { effort: r.model }) : r));
       const f = gm.M.features(pc, 0, modelKey(model), hist, session, nowSec,
                               { pb: promptBucket(pc), cb: contextBucket(contextChars || 0) });
-      const b = gm.M.band(data, f, cov);
-      if (!b || !(b.low > 0) || !(b.high >= b.low) || !isFinite(b.high)) return none;
       const n = learnedCount(history);
       // Until the lookup has MIN_READY replies the model knows nothing about you:
-      // say so, as the lookup's own wide band does.
-      const glb = { dur: b, words: local ? local.words : null, n, group: "global", coverage: cov,
-                    learning: n < MIN_READY };
+      // show the wide band (8 in 10) whatever the setting and say so, as the
+      // lookup's own learning band does (RAI-329, docs/FIRST_RUN.md).
+      const learning = n < MIN_READY;
+      const gcov = learning ? "80" : cov;
+      const b = gm.M.band(data, f, gcov);
+      if (!b || !(b.low > 0) || !(b.high >= b.low) || !isFinite(b.high)) return none;
+      const glb = { dur: b, words: local ? local.words : null, n, group: "global", coverage: gcov,
+                    learning };
       const [band, shown] = gm.M.choose(glb, local, history);
       return { band, shown, local, glb };
     } catch (e) {

@@ -50,7 +50,7 @@
     "model": {
       "type": "string",
       "title": "Range source",
-      "description": "global (default): a range from your first turn, from a model shared by everyone that runs on your machine and reads only numbers (prompt length, this session's turn times, your recent turn times); after 30 turns, your own history is used whenever it has been closer for you. local: only your own past turns, nothing until 10 turns.",
+      "description": "global (default): a range from your first turn (the wider 8-in-10 one, marked still learning, until 10 turns of your own), from a model shared by everyone that runs on your machine and reads only numbers (prompt length, this session's turn times, your recent turn times); after 30 turns, your own history is used whenever it has been closer for you. local: only your own past turns, nothing until 10 turns.",
       "default": "global"
     },
     "server_send_text": {

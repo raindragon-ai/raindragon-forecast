@@ -86,11 +86,21 @@ on public coding-agent sessions from 337 people; it holds numbers only), which
 reads this prompt's length, this session's earlier turns and, once you have
 some, your own recent turns:
 
+Until you have 10 turns of your own it shows the wider range, marked
+"still learning", because it does not know you yet:
+
+```
+☊☋ Forecast 5s–12m · 8 in 10 of turns like this · still learning
+```
+
+From 10 turns it shows the range you chose:
+
 ```
 ☊☋ Forecast 20s–2m · half of turns like this
 ```
 
-On people it never saw, the middle of that range was within 2x of the real
+[docs/FIRST_RUN.md](docs/FIRST_RUN.md) has the full rule, screenshots of a new
+install and what is not measured yet. On people it never saw, the middle of that range was within 2x of the real
 time more often than the per-user lookup (39.8% vs 35.8%), and about half of
 turns landed inside it. After 30 turns, Forecast keeps checking both ranges
 against your finished turns and shows whichever has been closer for you over
@@ -106,7 +116,7 @@ The extension (claude.ai, chatgpt.com, gemini.google.com) uses the same model
 and the same rule, with the model bundled inside it and run in the browser.
 "This session" is the conversation you are in, kept in memory only. The model
 was trained on agent turns, not chat replies, and has not been measured on
-them: until you have 10 replies its range is marked "still learning", and the
+them: until you have 10 replies its range is the wider one, marked "still learning", and the
 switch to your own history after 30 is what keeps it honest. The extension's
 options have the same **Range source** setting.
 

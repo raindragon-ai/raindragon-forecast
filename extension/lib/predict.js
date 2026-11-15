@@ -258,15 +258,29 @@
     return h > 0 ? h + ":" + String(m).padStart(2, "0") + ":" + ss : m + ":" + ss;
   }
 
-  // While a reply runs. long: the clock has passed the top of the range.
+  // Time still to go, from the forecast range and the time already spent:
+  // "about 8s–53s left", "up to 35s left" once past the bottom of the range,
+  // "almost done" in its last second.
+  function remainingText(band, elapsedS) {
+    if (band.dur.high - elapsedS < 1) return "almost done";
+    const hi = duration(band.dur.high - elapsedS);
+    if (elapsedS >= band.dur.low) return "up to " + hi + " left";
+    return "about " + span(duration(band.dur.low - elapsedS), hi) + " left";
+  }
+
+  // While a reply runs: the clock, then the time left. long: the clock has
+  // passed the top of the range.
   function liveLine(band, elapsedMs) {
     const c = clock(elapsedMs);
     if (!band) return { text: c, long: false };
-    if (elapsedMs / 1000 > band.dur.high) {
+    const e = elapsedMs / 1000;
+    if (e > band.dur.high) {
       return { text: c + " · running long · forecast was " +
                span(duration(band.dur.low), duration(band.dur.high)), long: true };
     }
-    return { text: bandLine(band) + " · " + c, long: false };
+    let s = c + " · " + remainingText(band, e);
+    if (band.words) s += " · " + wordsText(band.words.low, band.words.high);
+    return { text: s + (band.learning ? " · still learning" : ""), long: false };
   }
 
   // "Done in 1:12, 450 words · inside the forecast"

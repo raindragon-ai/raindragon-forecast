@@ -1,7 +1,7 @@
 /* RainDragon Forecast on chatgpt.com (content script, isolated world).
  *
  * While you type: a band from your own similar past ChatGPT replies.
- * While ChatGPT replies: the elapsed time next to that band.
+ * While ChatGPT replies: the elapsed time and the time likely left.
  * After: the reply's duration and word count are saved locally (no text), in
  * a history kept apart from claude.ai's.
  *

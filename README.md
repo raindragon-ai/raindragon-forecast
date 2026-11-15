@@ -68,11 +68,13 @@ If Claude has a major incident:
 A small bar just above the message box, with the RainDragon logo:
 
 ```
-[logo] Forecast 20s–1m · 300–800 words · 0:12
+[logo] Forecast 20s–1m · 300–800 words            while you type
+[logo] 0:12 · about 8s–53s left · 300–800 words   while the reply runs
 ```
 
-It shows how long the reply usually takes and how long it usually is, then a
-running clock. Each site keeps its own history, so ChatGPT replies never
+While you type, it shows how long the reply usually takes and how long it
+usually is. Once you send, it shows a running clock and how much time is
+likely left. Each site keeps its own history, so ChatGPT replies never
 change your Claude forecast. gemini.google.com support is new and not yet
 tested on the live site (see [docs/PROVIDERS.md](docs/PROVIDERS.md)).
 

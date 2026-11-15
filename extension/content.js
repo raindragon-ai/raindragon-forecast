@@ -2,7 +2,7 @@
  *
  * While you type: a band from your own similar past replies, for example
  * "Half of your similar replies took 20s–1m, 300–800 words (from 24)".
- * While Claude replies: the elapsed time next to that band.
+ * While Claude replies: the elapsed time and the time likely left.
  * After: the reply's duration and word count are saved locally (no text).
  *
  * Optional (settings serverSendText + serverMode, default off / shadow): the

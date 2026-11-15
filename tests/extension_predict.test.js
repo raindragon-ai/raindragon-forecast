@@ -75,9 +75,13 @@ test("band line", () => {
   assert.equal(eighty, "Forecast 5s");
 });
 
-test("live line: range then clock, then running long once past the top", () => {
+test("live line: clock and time left, then running long once past the top", () => {
   const band = { dur: { low: 20, high: 65 }, words: { low: 300, high: 800 }, n: 24, coverage: "50" };
-  assert.deepEqual(T.liveLine(band, 12_000), { text: "Forecast 20s–1m · 300–800 words · 0:12", long: false });
+  assert.deepEqual(T.liveLine(band, 12_000), { text: "0:12 · about 8s–53s left · 300–800 words", long: false });
+  assert.deepEqual(T.liveLine(band, 30_000), { text: "0:30 · up to 35s left · 300–800 words", long: false });
+  assert.deepEqual(T.liveLine(band, 65_000), { text: "1:05 · almost done · 300–800 words", long: false });
+  assert.deepEqual(T.liveLine({ dur: { low: 10, high: 40 }, learning: true }, 5_000),
+                   { text: "0:05 · about 5s–35s left · still learning", long: false });
   assert.deepEqual(T.liveLine(band, 80_000), { text: "1:20 · running long · forecast was 20s–1m", long: true });
   assert.deepEqual(T.liveLine(null, 5_000), { text: "0:05", long: false });
 });

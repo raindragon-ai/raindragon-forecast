@@ -1,7 +1,7 @@
 /* RainDragon Forecast on gemini.google.com (content script).
  *
  * While you type: a band from your own similar past Gemini replies.
- * While Gemini replies: the elapsed time next to that band.
+ * While Gemini replies: the elapsed time and the time likely left.
  * After: the reply's duration and word count are saved locally (no text), in
  * a history kept apart from claude.ai's and chatgpt.com's.
  *

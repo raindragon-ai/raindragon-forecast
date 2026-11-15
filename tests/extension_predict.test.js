@@ -235,6 +235,17 @@ test("global: a range from the first reply, marked still learning", () => {
   assert.ok(fc.band.dur.low > 0 && fc.band.dur.low < fc.band.dur.high);
   assert.equal(fc.band.learning, true);
   assert.match(T.bandLine(fc.band), /^Forecast .* · still learning$/);
+  // RAI-329: the wide band (8 in 10) whatever the setting, until 10 replies
+  assert.equal(fc.band.coverage, "80");
+  assert.equal(fc.glb.coverage, "80");
+});
+
+test("global: past 10 replies the chosen band, no longer learning", () => {
+  const h = Array.from({ length: 10 }, (_, i) => rec(5 + (i % 9) * 3));
+  const fc = T.forecast(h, 120, 0, "Opus 5.5 Medium", "50", "global", GM, null, 1.7e9);
+  assert.equal(fc.shown, "global");
+  assert.equal(fc.band.learning, false);
+  assert.equal(fc.band.coverage, "50");
 });
 
 test("global: the same numbers as the model on the same features", () => {

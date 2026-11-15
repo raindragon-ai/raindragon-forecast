@@ -156,15 +156,25 @@ def quantiles(model: dict, f: dict) -> list:
 
 
 def band(model: Optional[dict], f: dict, n: int, coverage: str = "50") -> Optional[predict.Band]:
-    """The global band (seconds). None without a model. Never raises."""
+    """The global band (seconds). None without a model. Never raises.
+
+    n is the user's own good turns. Below predict.MIN_READY the model knows
+    nothing about this person (cross-user error is not measured for them), so
+    the band is the wide one (8 in 10) whatever the setting, and marked
+    learning: a fresh install never shows a band as tight as a calibrated one
+    (RAI-329, docs/FIRST_RUN.md)."""
     if not model:
         return None
     try:
         q = quantiles(model, f)
     except (KeyError, IndexError, TypeError, ValueError):
         return None
+    learning = n < predict.MIN_READY
+    if learning:
+        coverage = "80"
     lo, hi = (q[0], q[4]) if coverage == "80" else (q[1], q[3])
-    return predict.Band(math.exp(lo), math.exp(hi), n, "global", "80" if coverage == "80" else "50")
+    return predict.Band(math.exp(lo), math.exp(hi), n, "global", "80" if coverage == "80" else "50",
+                        learning)
 
 
 # ---------- which band to show ----------

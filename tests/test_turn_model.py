@@ -83,9 +83,22 @@ def test_missing_or_broken_file_means_no_model(tmp_path):
 def test_first_turn_has_a_band_and_80_holds_50():
     m = turn_model.load()
     f = turn_model.features(120, 0, None, [], None, 1000)
-    b50, b80 = turn_model.band(m, f, 0, "50"), turn_model.band(m, f, 0, "80")
+    n = predict.MIN_READY
+    b50, b80 = turn_model.band(m, f, n, "50"), turn_model.band(m, f, n, "80")
     assert 0 < b50.low < b50.high and b80.low <= b50.low and b80.high >= b50.high
-    assert b50.group == "global" and not b50.learning
+    assert b50.group == "global" and not b50.learning and b50.coverage == "50"
+
+
+def test_new_user_gets_the_wide_band_marked_learning_whatever_the_setting():
+    # RAI-329: below MIN_READY own turns the model knows nothing about this
+    # person, so a fresh install never shows a band as tight as a calibrated one
+    m = turn_model.load()
+    f = turn_model.features(120, 0, None, [], None, 1000)
+    wide = turn_model.band(m, f, predict.MIN_READY, "80")
+    for n in (0, 1, predict.MIN_READY - 1):
+        b = turn_model.band(m, f, n, "50")
+        assert b.learning and b.coverage == "80"
+        assert (b.low, b.high) == (wide.low, wide.high)
 
 
 def test_session_features_keep_counting_past_the_kept_turns():
@@ -159,7 +172,8 @@ def prompt(i, sid="s1", text="fix the test"):
 
 def test_first_prompt_shows_the_global_band(env):
     out = run("prompt", prompt(1), env, 1000)
-    assert "of turns like this" in out["systemMessage"] and "learning" not in out["systemMessage"]
+    # zero history: the wide band, said to be learning (RAI-329)
+    assert out["systemMessage"].endswith(" · 8 in 10 of turns like this · still learning")
     p = json.load(open(os.path.join(env["CLAUDE_PLUGIN_DATA"], "pending", "s1")))
     assert p["shown"] == "global" and p["glb"][0] < p["glb"][1] and p["loc"] is None
 
@@ -209,3 +223,6 @@ def test_doctor_names_the_model(env):
     hook.main(["hook", "doctor"], io.StringIO(""), out, env, now=1001)
     doc = json.loads(out.getvalue())
     assert doc["model"]["setting"] == "global" and doc["model"]["file"] is True
+    # RAI-329: what the shipped model was fitted from is visible
+    assert doc["model"]["trained_on"] == turn_model.load()["trained_on"]
+    assert doc["model"]["trained_on"]["turns"] > 0 and doc["model"]["trained_on"]["people"] > 0
